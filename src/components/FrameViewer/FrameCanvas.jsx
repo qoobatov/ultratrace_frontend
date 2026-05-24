@@ -12,6 +12,8 @@ import { getPoints, savePoints, getFrameUrl } from "../../api/client";
 const MAX_HISTORY = 50;
 const MIN_SCALE = 0.5;
 const MAX_SCALE = 4;
+const CLICK_DIST_THRESHOLD = 3;
+const SELECTED_COLOR = "cyan";
 
 const FrameCanvas = ({
   frameNumber,
@@ -22,6 +24,8 @@ const FrameCanvas = ({
   const [image, setImage] = useState(null);
   const [points, setPoints] = useState([]);
   const [selectedIndices, setSelectedIndices] = useState(new Set());
+  // Флаг: выделение "зафиксировано" и отображается цветом до следующего действия
+  const [selectionFrozen, setSelectionFrozen] = useState(false);
   const [history, setHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const stageRef = useRef(null);
@@ -29,18 +33,25 @@ const FrameCanvas = ({
   const imageCache = useRef(new Map());
   const isShiftDown = useRef(false);
 
-  // Состояния для зума и панорамирования
   const [stageScale, setStageScale] = useState(1);
   const [stageX, setStageX] = useState(0);
   const [stageY, setStageY] = useState(0);
   const [isPanning, setIsPanning] = useState(false);
   const lastPointer = useRef({ x: 0, y: 0 });
 
-  // Загрузка изображения
+  const [selectionRect, setSelectionRect] = useState(null);
+  const [isSelecting, setIsSelecting] = useState(false);
+  const mouseDownPos = useRef(null);
+  const gestureStarted = useRef(false);
+  const pointDragged = useRef(false);
+
+  // Сбросить "заморозку" цвета выделения
+  const thawSelection = () => setSelectionFrozen(false);
+
+  // --- Загрузка изображения ---
   const loadImage = useCallback((frameNum) => {
-    if (imageCache.current.has(frameNum)) {
+    if (imageCache.current.has(frameNum))
       return Promise.resolve(imageCache.current.get(frameNum));
-    }
     return new Promise((resolve, reject) => {
       const img = new window.Image();
       img.crossOrigin = "anonymous";
@@ -63,14 +74,13 @@ const FrameCanvas = ({
       .catch((err) => {
         if (!cancelled) console.error("Failed to load frame", err);
       });
-    const nextFrame = frameNumber + 1;
-    loadImage(nextFrame).catch(() => {});
+    loadImage(frameNumber + 1).catch(() => {});
     return () => {
       cancelled = true;
     };
   }, [frameNumber, loadImage]);
 
-  // Загрузка точек и сброс истории
+  // --- Загрузка точек ---
   useEffect(() => {
     if (!activeTrace || !frameNumber) return;
     const fetchPoints = async () => {
@@ -78,6 +88,7 @@ const FrameCanvas = ({
         const pts = await getPoints(activeTrace, frameNumber);
         setPoints(pts || []);
         setSelectedIndices(new Set());
+        setSelectionFrozen(false);
         setHistory([{ points: pts || [] }]);
         setHistoryIndex(0);
       } catch (err) {
@@ -88,7 +99,7 @@ const FrameCanvas = ({
     fetchPoints();
   }, [activeTrace, frameNumber, pointsVersion]);
 
-  // История
+  // --- История ---
   const pushHistory = useCallback(
     (newPoints) => {
       setHistory((prev) => {
@@ -110,6 +121,7 @@ const FrameCanvas = ({
       setPoints(oldState.points);
       savePoints(activeTrace, frameNumber, oldState.points);
       setSelectedIndices(new Set());
+      setSelectionFrozen(false);
     }
   };
 
@@ -121,10 +133,11 @@ const FrameCanvas = ({
       setPoints(nextState.points);
       savePoints(activeTrace, frameNumber, nextState.points);
       setSelectedIndices(new Set());
+      setSelectionFrozen(false);
     }
   };
 
-  // Клавиатура
+  // --- Клавиатура ---
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.key === "Shift") isShiftDown.current = true;
@@ -138,6 +151,7 @@ const FrameCanvas = ({
         savePoints(activeTrace, frameNumber, newPoints);
         pushHistory(newPoints);
         setSelectedIndices(new Set());
+        setSelectionFrozen(false);
       }
       if ((e.ctrlKey || e.metaKey) && e.key === "z") {
         e.preventDefault();
@@ -156,7 +170,7 @@ const FrameCanvas = ({
     };
   }, [points, selectedIndices, activeTrace, frameNumber, pushHistory]);
 
-  // Преобразование координат из сцены в относительные (0..1) на изображении
+  // --- Координаты ---
   const getRelativeCoords = useCallback(
     (pointerPos) => {
       const stage = stageRef.current;
@@ -167,144 +181,307 @@ const FrameCanvas = ({
         stage.width() / image.width,
         stage.height() / image.height,
       );
-      const x = canvasPos.x / (image.width * scale);
-      const y = canvasPos.y / (image.height * scale);
-      return { x, y };
+      return {
+        x: canvasPos.x / (image.width * scale),
+        y: canvasPos.y / (image.height * scale),
+      };
     },
     [image],
   );
 
-  // Основной обработчик клика по сцене
-  const handleStageClick = (e) => {
-    const stage = stageRef.current;
-    if (!stage) return;
-
-    // Проверяем, попал ли клик в какую-либо точку (Group с data-index)
-    const clickedGroup = e.target.findAncestor(".point-group");
-    if (clickedGroup) {
-      const index = parseInt(clickedGroup.attrs["data-index"], 10);
-      if (!isNaN(index)) {
-        // Выделение точки (с Shift или без)
-        if (isShiftDown.current) {
-          setSelectedIndices((prev) => {
-            const newSet = new Set(prev);
-            if (newSet.has(index)) newSet.delete(index);
-            else newSet.add(index);
-            return newSet;
-          });
-        } else {
-          setSelectedIndices(new Set([index]));
-        }
-        return; // не добавляем новую точку
-      }
-    }
-
-    // Иначе добавление новой точки (клик по фону или изображению)
-    if (e.target !== stageRef.current && e.target !== imageRef.current) return;
+  const addPointAt = (pointerPos) => {
     if (!activeTrace || !image) return;
-
-    const pointerPos = stage.getPointerPosition();
-    if (!pointerPos) return;
     const rel = getRelativeCoords(pointerPos);
     if (!rel) return;
-
-    // Проверка минимального расстояния до существующих точек
-    const minDistRel =
-      12 /
-      (image.width *
-        Math.min(stage.width() / image.width, stage.height() / image.height));
+    const stage = stageRef.current;
+    const baseScale = Math.min(
+      stage.width() / image.width,
+      stage.height() / image.height,
+    );
+    const minDistRel = 12 / (image.width * baseScale);
     const tooClose = points.some(
       (p) => Math.hypot(p.x - rel.x, p.y - rel.y) < minDistRel,
     );
     if (tooClose) return;
-
+    thawSelection(); // добавление точки сбрасывает цвет выделения
     const newPoints = [...points, { x: rel.x, y: rel.y }];
     setPoints(newPoints);
     savePoints(activeTrace, frameNumber, newPoints);
     pushHistory(newPoints);
   };
 
-  // Перетаскивание точки (или группы)
-  const handleDragEnd = (index, e) => {
+  const isOverPoint = (pointerPos) => {
     const stage = stageRef.current;
-    if (!stage || !image) return;
-    const group = e.target;
-    const groupPos = group.getAbsolutePosition();
-    const rel = getRelativeCoords(groupPos);
-    if (!rel) return;
-    const newX = rel.x;
-    const newY = rel.y;
+    if (!stage || !image) return false;
+    const baseScale = Math.min(
+      stage.width() / image.width,
+      stage.height() / image.height,
+    );
+    const transform = stage.getAbsoluteTransform().copy().invert();
+    const worldPos = transform.point(pointerPos);
+    return points.some((point) => {
+      const cx = point.x * image.width * baseScale;
+      const cy = point.y * image.height * baseScale;
+      return Math.hypot(worldPos.x - cx, worldPos.y - cy) < 12;
+    });
+  };
 
-    let newPoints;
-    if (selectedIndices.has(index)) {
-      const oldPoint = points[index];
-      const dx = newX - oldPoint.x;
-      const dy = newY - oldPoint.y;
-      newPoints = points.map((p, i) => {
-        if (selectedIndices.has(i)) {
-          return { x: p.x + dx, y: p.y + dy };
+  // --- Stage mouse handlers ---
+  const handleStageMouseDown = () => {
+    const stage = stageRef.current;
+    const pointerPos = stage.getPointerPosition();
+    if (isOverPoint(pointerPos)) return;
+
+    mouseDownPos.current = { x: pointerPos.x, y: pointerPos.y };
+    gestureStarted.current = false;
+  };
+
+  const handleStageMouseMove = () => {
+    if (!mouseDownPos.current) return;
+    const stage = stageRef.current;
+    const pointerPos = stage.getPointerPosition();
+    const dx = pointerPos.x - mouseDownPos.current.x;
+    const dy = pointerPos.y - mouseDownPos.current.y;
+    if (!gestureStarted.current && Math.hypot(dx, dy) < CLICK_DIST_THRESHOLD)
+      return;
+    gestureStarted.current = true;
+
+    // Shift зажат → всегда рамка выделения, даже при zoom > 1
+    const shouldSelect = stageScale <= 1 || isShiftDown.current;
+
+    if (!shouldSelect) {
+      // Панорамирование
+      if (!isPanning) {
+        setIsPanning(true);
+        lastPointer.current = { x: pointerPos.x, y: pointerPos.y };
+      } else {
+        const pdx = pointerPos.x - lastPointer.current.x;
+        const pdy = pointerPos.y - lastPointer.current.y;
+        lastPointer.current = { x: pointerPos.x, y: pointerPos.y };
+        setStageX((prev) => prev + pdx);
+        setStageY((prev) => prev + pdy);
+      }
+    } else {
+      // Рамка выделения
+      setIsSelecting(true);
+      setSelectionRect({
+        x1: mouseDownPos.current.x,
+        y1: mouseDownPos.current.y,
+        x2: pointerPos.x,
+        y2: pointerPos.y,
+      });
+    }
+  };
+
+  const handleStageMouseUp = () => {
+    if (isPanning) {
+      setIsPanning(false);
+      mouseDownPos.current = null;
+      return;
+    }
+
+    if (isSelecting) {
+      setIsSelecting(false);
+      const stage = stageRef.current;
+      if (selectionRect && image) {
+        const transform = stage.getAbsoluteTransform().copy().invert();
+        const p1 = transform.point({
+          x: Math.min(selectionRect.x1, selectionRect.x2),
+          y: Math.min(selectionRect.y1, selectionRect.y2),
+        });
+        const p2 = transform.point({
+          x: Math.max(selectionRect.x1, selectionRect.x2),
+          y: Math.max(selectionRect.y1, selectionRect.y2),
+        });
+        const baseScale = Math.min(
+          stage.width() / image.width,
+          stage.height() / image.height,
+        );
+        const minX = p1.x / (image.width * baseScale);
+        const maxX = p2.x / (image.width * baseScale);
+        const minY = p1.y / (image.height * baseScale);
+        const maxY = p2.y / (image.height * baseScale);
+
+        const newSelected = new Set();
+        points.forEach((p, i) => {
+          if (p.x >= minX && p.x <= maxX && p.y >= minY && p.y <= maxY)
+            newSelected.add(i);
+        });
+        if (newSelected.size > 0) {
+          setSelectedIndices(newSelected);
+          setSelectionFrozen(true); // фиксируем цвет после рамки
+        } else {
+          setSelectedIndices(new Set());
+          setSelectionFrozen(false);
         }
-        return p;
+      }
+      setSelectionRect(null);
+      mouseDownPos.current = null;
+      return;
+    }
+
+    // Клик по фону
+    if (!gestureStarted.current && mouseDownPos.current) {
+      // Клик по пустому месту сбрасывает выделение и цвет
+      setSelectedIndices(new Set());
+      setSelectionFrozen(false);
+      addPointAt(stageRef.current.getPointerPosition());
+    }
+    mouseDownPos.current = null;
+  };
+
+  // --- Обработчики точек ---
+  const handlePointClick = (index, e) => {
+    if (pointDragged.current) {
+      pointDragged.current = false;
+      return;
+    }
+    e.cancelBubble = true;
+    if (isShiftDown.current) {
+      setSelectedIndices((prev) => {
+        const newSet = new Set(prev);
+        if (newSet.has(index)) newSet.delete(index);
+        else newSet.add(index);
+        // Фиксируем цвет если что-то выделено
+        setSelectionFrozen(newSet.size > 0);
+        return newSet;
       });
     } else {
+      setSelectedIndices(new Set([index]));
+      setSelectionFrozen(true); // клик по точке фиксирует цвет
+    }
+  };
+
+  const handlePointDragStart = (index, e) => {
+    e.cancelBubble = true;
+    pointDragged.current = false;
+    mouseDownPos.current = null;
+    thawSelection(); // начало drag сбрасывает цвет
+    if (!selectedIndices.has(index)) setSelectedIndices(new Set([index]));
+  };
+
+  const handlePointDragMove = (index, e) => {
+    e.cancelBubble = true;
+    pointDragged.current = true;
+    if (!selectedIndices.has(index) || selectedIndices.size <= 1) return;
+
+    const stage = stageRef.current;
+    if (!stage || !image) return;
+    const baseScale = Math.min(
+      stage.width() / image.width,
+      stage.height() / image.height,
+    );
+    const group = e.target;
+    const groupAbsPos = group.getAbsolutePosition();
+    const draggedWorld = {
+      x: groupAbsPos.x / stageScale - stageX / stageScale,
+      y: groupAbsPos.y / stageScale - stageY / stageScale,
+    };
+    const origPoint = points[index];
+    const origWorld = {
+      x: origPoint.x * image.width * baseScale,
+      y: origPoint.y * image.height * baseScale,
+    };
+    const deltaX = draggedWorld.x - origWorld.x;
+    const deltaY = draggedWorld.y - origWorld.y;
+
+    const layer = stage.findOne("Layer");
+    if (!layer) return;
+    layer.find("Group").forEach((g) => {
+      const gIndex = g.getAttr("data-index");
+      if (
+        gIndex === undefined ||
+        gIndex === index ||
+        !selectedIndices.has(gIndex)
+      )
+        return;
+      const p = points[gIndex];
+      g.x(p.x * image.width * baseScale + deltaX);
+      g.y(p.y * image.height * baseScale + deltaY);
+    });
+  };
+
+  const handlePointDragEnd = (index, e) => {
+    e.cancelBubble = true;
+    pointDragged.current = true;
+
+    const stage = stageRef.current;
+    if (!stage || !image) return;
+    const baseScale = Math.min(
+      stage.width() / image.width,
+      stage.height() / image.height,
+    );
+    const group = e.target;
+    const groupAbsPos = group.getAbsolutePosition();
+    const draggedWorld = {
+      x: groupAbsPos.x / stageScale - stageX / stageScale,
+      y: groupAbsPos.y / stageScale - stageY / stageScale,
+    };
+    const origPoint = points[index];
+    const origWorld = {
+      x: origPoint.x * image.width * baseScale,
+      y: origPoint.y * image.height * baseScale,
+    };
+    const deltaRelX =
+      (draggedWorld.x - origWorld.x) / (image.width * baseScale);
+    const deltaRelY =
+      (draggedWorld.y - origWorld.y) / (image.height * baseScale);
+
+    let newPoints;
+    if (selectedIndices.has(index) && selectedIndices.size > 1) {
       newPoints = points.map((p, i) =>
-        i === index ? { x: newX, y: newY } : p,
+        selectedIndices.has(i) ? { x: p.x + deltaRelX, y: p.y + deltaRelY } : p,
+      );
+    } else {
+      newPoints = points.map((p, i) =>
+        i === index
+          ? {
+              x: draggedWorld.x / (image.width * baseScale),
+              y: draggedWorld.y / (image.height * baseScale),
+            }
+          : p,
       );
     }
+
+    const layer = stage.findOne("Layer");
+    if (layer) {
+      layer.find("Group").forEach((g) => {
+        const gIndex = g.getAttr("data-index");
+        if (gIndex === undefined) return;
+        const p = newPoints[gIndex];
+        if (p) {
+          g.x(p.x * image.width * baseScale);
+          g.y(p.y * image.height * baseScale);
+        }
+      });
+    }
+
     setPoints(newPoints);
     savePoints(activeTrace, frameNumber, newPoints);
     pushHistory(newPoints);
+    // После drag выделение остаётся, но цвет сбрасывается — следующее действие уберёт highlight
+    // (уже сброшено в dragStart через thawSelection)
   };
 
-  // Зум колесом
+  // --- Зум ---
   const handleWheel = (e) => {
     e.evt.preventDefault();
     const stage = stageRef.current;
     if (!stage) return;
     const oldScale = stage.scaleX();
     const pointer = stage.getPointerPosition();
-    const scaleBy = 1.05;
     const direction = e.evt.deltaY > 0 ? 1 : -1;
-    const newScale = direction > 0 ? oldScale * scaleBy : oldScale / scaleBy;
+    const newScale = direction > 0 ? oldScale * 1.05 : oldScale / 1.05;
     const clampedScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, newScale));
-
     const mousePointTo = {
       x: (pointer.x - stage.x()) / oldScale,
       y: (pointer.y - stage.y()) / oldScale,
     };
-    const newX = pointer.x - mousePointTo.x * clampedScale;
-    const newY = pointer.y - mousePointTo.y * clampedScale;
-
     setStageScale(clampedScale);
-    setStageX(newX);
-    setStageY(newY);
+    setStageX(pointer.x - mousePointTo.x * clampedScale);
+    setStageY(pointer.y - mousePointTo.y * clampedScale);
   };
 
-  // Панорамирование – только при stageScale > 1
-  const handleMouseDown = (e) => {
-    if (stageScale <= 1) return;
-    if (e.target === stageRef.current || e.target === imageRef.current) {
-      setIsPanning(true);
-      const pos = stageRef.current.getPointerPosition();
-      lastPointer.current = { x: pos.x, y: pos.y };
-    }
-  };
-
-  const handleMouseMove = () => {
-    if (!isPanning || stageScale <= 1) return;
-    const pos = stageRef.current.getPointerPosition();
-    const dx = pos.x - lastPointer.current.x;
-    const dy = pos.y - lastPointer.current.y;
-    lastPointer.current = { x: pos.x, y: pos.y };
-    setStageX((prev) => prev + dx);
-    setStageY((prev) => prev + dy);
-  };
-
-  const handleMouseUp = () => {
-    setIsPanning(false);
-  };
-
-  // Сброс зума
   const resetZoom = () => {
     setStageScale(1);
     setStageX(0);
@@ -320,6 +497,19 @@ const FrameCanvas = ({
     stageHeight / image.height,
   );
   const color = traceColor || "red";
+
+  const selRectStyle = selectionRect
+    ? {
+        position: "absolute",
+        left: Math.min(selectionRect.x1, selectionRect.x2),
+        top: Math.min(selectionRect.y1, selectionRect.y2),
+        width: Math.abs(selectionRect.x2 - selectionRect.x1),
+        height: Math.abs(selectionRect.y2 - selectionRect.y1),
+        border: "1px solid rgba(0,128,255,0.8)",
+        background: "rgba(0,128,255,0.12)",
+        pointerEvents: "none",
+      }
+    : null;
 
   return (
     <div
@@ -344,80 +534,93 @@ const FrameCanvas = ({
             : "No selection"}
         </span>
         <button
-          onClick={() =>
-            setStageScale((prev) => Math.min(MAX_SCALE, prev * 1.1))
-          }
+          onClick={() => setStageScale((p) => Math.min(MAX_SCALE, p * 1.1))}
         >
           🔍+
         </button>
         <button
-          onClick={() =>
-            setStageScale((prev) => Math.max(MIN_SCALE, prev / 1.1))
-          }
+          onClick={() => setStageScale((p) => Math.max(MIN_SCALE, p / 1.1))}
         >
           🔍−
         </button>
         <button onClick={resetZoom}>Reset</button>
       </div>
-      <Stage
-        width={stageWidth}
-        height={stageHeight}
-        ref={stageRef}
-        scaleX={stageScale}
-        scaleY={stageScale}
-        x={stageX}
-        y={stageY}
-        onClick={handleStageClick}
-        onTap={handleStageClick}
-        onWheel={handleWheel}
-        onMouseDown={handleMouseDown}
-        onMousemove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
-        style={{ cursor: isPanning && stageScale > 1 ? "grabbing" : "default" }}
-      >
-        <Layer>
-          <KonvaImage
-            ref={imageRef}
-            image={image}
-            x={0}
-            y={0}
-            width={image.width * baseScale}
-            height={image.height * baseScale}
-          />
-          {points.map((point, i) => {
-            const cx = point.x * image.width * baseScale;
-            const cy = point.y * image.height * baseScale;
-            const isSelected = selectedIndices.has(i);
-            const size = 7; // чуть больше
-            return (
-              <Group
-                key={i}
-                x={cx}
-                y={cy}
-                draggable
-                onDragEnd={(e) => handleDragEnd(i, e)}
-                name="point-group"
-                data-index={i}
-              >
-                <Line
-                  points={[-size, 0, size, 0]}
-                  stroke={isSelected ? "yellow" : color}
-                  strokeWidth={1.5}
-                  listening={false}
-                />
-                <Line
-                  points={[0, -size, 0, size]}
-                  stroke={isSelected ? "yellow" : color}
-                  strokeWidth={1.5}
-                  listening={false}
-                />
-                <Circle radius={10} fill="transparent" listening={false} />
-              </Group>
-            );
-          })}
-        </Layer>
-      </Stage>
+
+      <div style={{ position: "relative", lineHeight: 0 }}>
+        <Stage
+          width={stageWidth}
+          height={stageHeight}
+          ref={stageRef}
+          scaleX={stageScale}
+          scaleY={stageScale}
+          x={stageX}
+          y={stageY}
+          onMouseDown={handleStageMouseDown}
+          onMousemove={handleStageMouseMove}
+          onMouseUp={handleStageMouseUp}
+          onMouseLeave={handleStageMouseUp}
+          onWheel={handleWheel}
+          style={{
+            cursor: isPanning
+              ? "grabbing"
+              : isSelecting
+                ? "crosshair"
+                : "default",
+          }}
+        >
+          <Layer>
+            <KonvaImage
+              ref={imageRef}
+              image={image}
+              x={0}
+              y={0}
+              width={image.width * baseScale}
+              height={image.height * baseScale}
+            />
+            {points.map((point, i) => {
+              const cx = point.x * image.width * baseScale;
+              const cy = point.y * image.height * baseScale;
+              const isSelected = selectedIndices.has(i);
+              // Цвет: cyan если выделено и заморожено, yellow если выделено в процессе, иначе traceColor
+              const ptColor = isSelected
+                ? selectionFrozen
+                  ? SELECTED_COLOR
+                  : "yellow"
+                : color;
+              const size = 7;
+              return (
+                <Group
+                  key={i}
+                  x={cx}
+                  y={cy}
+                  draggable
+                  onDragStart={(e) => handlePointDragStart(i, e)}
+                  onDragMove={(e) => handlePointDragMove(i, e)}
+                  onDragEnd={(e) => handlePointDragEnd(i, e)}
+                  onClick={(e) => handlePointClick(i, e)}
+                  onTap={(e) => handlePointClick(i, e)}
+                  data-index={i}
+                >
+                  <Line
+                    points={[-size, 0, size, 0]}
+                    stroke={ptColor}
+                    strokeWidth={1.5}
+                    listening={false}
+                  />
+                  <Line
+                    points={[0, -size, 0, size]}
+                    stroke={ptColor}
+                    strokeWidth={1.5}
+                    listening={false}
+                  />
+                  <Circle radius={10} fill="transparent" />
+                </Group>
+              );
+            })}
+          </Layer>
+        </Stage>
+        {selRectStyle && <div style={selRectStyle} />}
+      </div>
     </div>
   );
 };

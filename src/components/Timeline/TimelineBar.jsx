@@ -14,21 +14,31 @@ const TimelineBar = ({
   onSeek,
   frameTimes,
   onFrameChange,
+  viewStart,
+  viewEnd,
 }) => {
   const barRef = useRef(null);
 
+  const effStart = viewStart ?? 0;
+  const effEnd = viewEnd ?? duration;
+  const viewDuration = effEnd - effStart;
+
   const handleClick = (e) => {
-    if (!barRef.current || !duration) return;
+    if (!barRef.current || !viewDuration) return;
     const rect = barRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
-    const ratio = x / rect.width;
-    const time = ratio * duration;
+    const ratio = Math.max(0, Math.min(1, x / rect.width));
+    // Переводим клик в абсолютное время с учётом окна
+    const time = effStart + ratio * viewDuration;
     onSeek && onSeek(time);
     const frame = getFrameAtTime(time, frameTimes);
     onFrameChange && onFrameChange(frame);
   };
 
-  const progress = duration ? (currentTime / duration) * 100 : 0;
+  // Позиция курсора внутри видимого окна
+  const cursorRatio =
+    viewDuration > 0 ? (currentTime - effStart) / viewDuration : 0;
+  const cursorVisible = cursorRatio >= 0 && cursorRatio <= 1;
 
   return (
     <div
@@ -43,13 +53,30 @@ const TimelineBar = ({
         margin: "4px 0",
       }}
     >
-      <div
-        style={{
-          width: `${progress}%`,
-          height: "100%",
-          background: "#0af",
-        }}
-      />
+      {/* Прогресс-бар до курсора */}
+      {cursorVisible && (
+        <div
+          style={{
+            width: `${cursorRatio * 100}%`,
+            height: "100%",
+            background: "#0af",
+          }}
+        />
+      )}
+      {/* Красная линия курсора */}
+      {cursorVisible && (
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            bottom: 0,
+            left: `${cursorRatio * 100}%`,
+            width: "1px",
+            background: "red",
+            pointerEvents: "none",
+          }}
+        />
+      )}
     </div>
   );
 };

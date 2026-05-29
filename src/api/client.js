@@ -78,10 +78,13 @@ export const getTextGridIntervals = async () => {
   return response.data;
 };
 
-// --- Study & Methods ---
+// --- Спектрограмма ---
+export const getSpectrogramUrl = () => `${API_BASE}/spectrogram/`;
+
+// --- Study / методы / файлы (для Header) ---
 export const getStudyFiles = async () => {
   const response = await client.get("/study/files");
-  return response.data; // массив { index, name, ... }
+  return response.data;
 };
 
 export const switchFile = async (index) => {
@@ -90,7 +93,7 @@ export const switchFile = async (index) => {
 
 export const getAvailableMethods = async () => {
   const response = await client.get("/study/methods");
-  return response.data; // массив строк
+  return response.data;
 };
 
 export const changeMethod = async (method) => {
@@ -99,6 +102,14 @@ export const changeMethod = async (method) => {
   );
 };
 
-export const getSpectrogramUrl = () => `${API_BASE}/spectrogram/`;
+// --- Offset ---
+export const setFrameOffset = async (offsetMs) => {
+  await client.post(`/study/set-offset?offset_ms=${offsetMs}`);
+};
+
+export const getStudyOffset = async () => {
+  const response = await client.get("/study/offset");
+  return response.data;
+};
 
 export default client;

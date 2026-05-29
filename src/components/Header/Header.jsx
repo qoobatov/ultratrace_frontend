@@ -12,7 +12,6 @@ const Header = ({ frame, setFrame, onFileChange, onMethodChange }) => {
   const [methods, setMethods] = useState([]);
   const [selectedMethod, setSelectedMethod] = useState("");
 
-  // Загружаем список файлов при монтировании
   useEffect(() => {
     getStudyFiles().then((data) => {
       setFiles(data);
@@ -27,9 +26,7 @@ const Header = ({ frame, setFrame, onFileChange, onMethodChange }) => {
     const idx = Number(e.target.value);
     setSelectedFile(idx);
     await switchFile(idx);
-    // Сообщаем родителю, чтобы обновил данные (трассы, цвета, кадры)
     onFileChange && onFileChange();
-    // После смены файла обновим список методов
     const newMethods = await getAvailableMethods();
     setMethods(newMethods);
     if (newMethods.length > 0) setSelectedMethod(newMethods[0]);

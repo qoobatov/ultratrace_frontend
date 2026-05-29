@@ -8,6 +8,8 @@ import {
   setDefaultTrace,
   clearFramePoints,
   clearAllPoints,
+  getTextGridIntervals,
+  getFrameTimes,
 } from "../../api/client";
 
 const DEFAULT_SPECTROGRAM_PARAMS = {
@@ -23,6 +25,8 @@ const Sidebar = ({
   frameNumber,
   spectrogramParams,
   onSpectrogramParamsChange,
+  offset,
+  onOffsetApply,
 }) => {
   const [traces, setTraces] = useState([]);
   const [traceColors, setTraceColors] = useState({});
@@ -35,13 +39,41 @@ const Sidebar = ({
   const [localSpecParams, setLocalSpecParams] = useState(
     spectrogramParams || DEFAULT_SPECTROGRAM_PARAMS,
   );
+  const [localOffset, setLocalOffset] = useState(offset || 0);
+
+  const [tierStats, setTierStats] = useState({});
+  const [totalFrames, setTotalFrames] = useState(0);
 
   useEffect(() => {
-    if (spectrogramParams) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setLocalSpecParams(spectrogramParams);
-    }
+    const loadStats = async () => {
+      try {
+        const intervals = await getTextGridIntervals();
+        const ftData = await getFrameTimes();
+        const frameCount =
+          ftData.count || (ftData.times ? ftData.times.length : 0);
+        setTotalFrames(frameCount);
+        const grouped = {};
+        intervals.forEach((item) => {
+          if (!grouped[item.tier]) grouped[item.tier] = 0;
+          grouped[item.tier]++;
+        });
+        setTierStats(grouped);
+      } catch (err) {
+        console.error("Failed to load TextGrid stats", err);
+      }
+    };
+    loadStats();
+  }, []);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (spectrogramParams) setLocalSpecParams(spectrogramParams);
   }, [spectrogramParams]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLocalOffset(offset);
+  }, [offset]);
 
   const fetchTraces = useCallback(async () => {
     try {
@@ -52,9 +84,7 @@ const Sidebar = ({
       setDefaultTraceName(data.default || null);
       if (!initialized) {
         const defaultTrace = data.default || traceList[0];
-        if (defaultTrace && !activeTrace) {
-          onSelectTrace(defaultTrace);
-        }
+        if (defaultTrace && !activeTrace) onSelectTrace(defaultTrace);
         setInitialized(true);
       }
     } catch (err) {
@@ -73,7 +103,7 @@ const Sidebar = ({
       await createTrace(newName.trim());
       setNewName("");
       await fetchTraces();
-      onTracesUpdate && onTracesUpdate();
+      onTracesUpdate?.();
     } catch (err) {
       console.error("Failed to create trace", err);
     }
@@ -86,10 +116,8 @@ const Sidebar = ({
       setRenameTarget(null);
       setRenameValue("");
       await fetchTraces();
-      if (activeTrace === oldName) {
-        onSelectTrace(renameValue.trim());
-      }
-      onTracesUpdate && onTracesUpdate();
+      if (activeTrace === oldName) onSelectTrace(renameValue.trim());
+      onTracesUpdate?.();
     } catch (err) {
       console.error("Failed to rename trace", err);
     }
@@ -100,10 +128,8 @@ const Sidebar = ({
     try {
       await deleteTrace(name);
       await fetchTraces();
-      if (activeTrace === name) {
-        onSelectTrace(null);
-      }
-      onTracesUpdate && onTracesUpdate();
+      if (activeTrace === name) onSelectTrace(null);
+      onTracesUpdate?.();
     } catch (err) {
       console.error("Failed to delete trace", err);
     }
@@ -114,7 +140,7 @@ const Sidebar = ({
       await setTraceColor(name, color);
       setColorPickerVisible(null);
       await fetchTraces();
-      onTracesUpdate && onTracesUpdate();
+      onTracesUpdate?.();
     } catch (err) {
       console.error("Failed to set color", err);
     }
@@ -124,7 +150,7 @@ const Sidebar = ({
     try {
       await setDefaultTrace(name);
       await fetchTraces();
-      onTracesUpdate && onTracesUpdate();
+      onTracesUpdate?.();
     } catch (err) {
       console.error("Failed to set default trace", err);
     }
@@ -140,7 +166,7 @@ const Sidebar = ({
       return;
     try {
       await clearFramePoints(activeTrace, frameNumber);
-      onTracesUpdate && onTracesUpdate();
+      onTracesUpdate?.();
     } catch (err) {
       console.error("Failed to clear frame points", err);
     }
@@ -149,24 +175,19 @@ const Sidebar = ({
   const handleSpecChange = (field, value) => {
     const newParams = { ...localSpecParams, [field]: value };
     setLocalSpecParams(newParams);
-    if (onSpectrogramParamsChange) {
-      onSpectrogramParamsChange(newParams);
-    }
+    onSpectrogramParamsChange?.(newParams);
   };
 
   const handleSpecReset = () => {
     setLocalSpecParams(DEFAULT_SPECTROGRAM_PARAMS);
-    if (onSpectrogramParamsChange) {
-      onSpectrogramParamsChange(DEFAULT_SPECTROGRAM_PARAMS);
-    }
+    onSpectrogramParamsChange?.(DEFAULT_SPECTROGRAM_PARAMS);
   };
 
   const handleSpecApply = () => {
-    // уже применено мгновенно, но оставим для явной фиксации
-    if (onSpectrogramParamsChange) {
-      onSpectrogramParamsChange(localSpecParams);
-    }
+    onSpectrogramParamsChange?.(localSpecParams);
   };
+
+  const displayTiers = ["sentence", "word", "orthographic vowel"];
 
   return (
     <div
@@ -326,15 +347,29 @@ const Sidebar = ({
                 )
               )
                 return;
-              clearAllPoints(activeTrace).then(
-                () => onTracesUpdate && onTracesUpdate(),
-              );
+              clearAllPoints(activeTrace).then(() => onTracesUpdate?.());
             }}
             disabled={!activeTrace}
             style={{ width: "100%" }}
           >
             Clear All Frames
           </button>
+        </div>
+
+        {/* TextGrid statistics */}
+        <div
+          style={{
+            marginTop: "12px",
+            borderTop: "1px solid #ccc",
+            paddingTop: "8px",
+          }}
+        >
+          <h4 style={{ margin: "0 0 4px 0" }}>Annotations</h4>
+          {displayTiers.map((tierName) => (
+            <div key={tierName} style={{ marginBottom: "4px" }}>
+              {tierName} ({tierStats[tierName] || 0}/{totalFrames})
+            </div>
+          ))}
         </div>
 
         {/* Spectrogram Settings */}
@@ -347,7 +382,7 @@ const Sidebar = ({
         >
           <h4 style={{ margin: "0 0 4px 0" }}>Spectrogram</h4>
           <label style={{ display: "block", marginBottom: "4px" }}>
-            Freq Max:
+            Freq Max:{" "}
             <input
               type="number"
               value={localSpecParams.freq_max}
@@ -360,7 +395,7 @@ const Sidebar = ({
             />
           </label>
           <label style={{ display: "block", marginBottom: "4px" }}>
-            Window:
+            Window:{" "}
             <input
               type="number"
               value={localSpecParams.window_length}
@@ -376,7 +411,7 @@ const Sidebar = ({
             />
           </label>
           <label style={{ display: "block", marginBottom: "4px" }}>
-            Dyn Range:
+            Dyn Range:{" "}
             <input
               type="number"
               value={localSpecParams.dynamic_range}
@@ -394,6 +429,32 @@ const Sidebar = ({
           <div style={{ marginTop: "4px", display: "flex", gap: "4px" }}>
             <button onClick={handleSpecApply}>Apply</button>
             <button onClick={handleSpecReset}>Standards</button>
+          </div>
+        </div>
+
+        {/* Offset settings */}
+        <div
+          style={{
+            marginTop: "12px",
+            borderTop: "1px solid #ccc",
+            paddingTop: "8px",
+          }}
+        >
+          <h4 style={{ margin: "0 0 4px 0" }}>Offset</h4>
+          <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+            <input
+              type="number"
+              value={localOffset}
+              onChange={(e) => setLocalOffset(Number(e.target.value))}
+              step="1"
+              style={{ width: "80px" }}
+            />
+            <span>ms</span>
+          </div>
+          <div style={{ marginTop: "4px" }}>
+            <button onClick={() => onOffsetApply(localOffset)}>
+              Apply Offset
+            </button>
           </div>
         </div>
       </div>

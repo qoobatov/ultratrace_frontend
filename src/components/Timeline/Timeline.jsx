@@ -95,7 +95,13 @@ const Timeline = forwardRef(
 
     const zoomToSelection = useCallback(() => {
       if (!selectedInterval) return;
-      const [s, e] = clampView(selectedInterval.start, selectedInterval.end);
+      const intervalDuration = selectedInterval.end - selectedInterval.start;
+      // Добавляем 10% отступ с каждой стороны
+      const padding = intervalDuration * 10;
+      const [s, e] = clampView(
+        selectedInterval.start - padding,
+        selectedInterval.end + padding,
+      );
       setViewStart(s);
       setViewEnd(e);
     }, [selectedInterval, clampView]);
@@ -120,7 +126,12 @@ const Timeline = forwardRef(
     // ── Клавиатурные биндинги ─────────────────────────────────────────────
     useEffect(() => {
       const onKeyDown = (e) => {
-        // Не перехватываем, если фокус в поле ввода
+        const ctrl = e.ctrlKey || e.metaKey;
+
+        if (ctrl && ["i", "o", "a", "e"].includes(e.key)) {
+          e.preventDefault();
+        }
+
         if (
           e.target.tagName === "INPUT" ||
           e.target.tagName === "TEXTAREA" ||
@@ -128,24 +139,10 @@ const Timeline = forwardRef(
         )
           return;
 
-        const ctrl = e.ctrlKey || e.metaKey;
-
-        if (ctrl && e.key === "i") {
-          e.preventDefault();
-          zoomIn();
-        }
-        if (ctrl && e.key === "o") {
-          e.preventDefault();
-          zoomOut();
-        }
-        if (ctrl && e.key === "a") {
-          e.preventDefault();
-          zoomAll();
-        }
-        if (ctrl && e.key === "n") {
-          e.preventDefault();
-          zoomToSelection();
-        }
+        if (ctrl && e.key === "i") zoomIn();
+        if (ctrl && e.key === "o") zoomOut();
+        if (ctrl && e.key === "a") zoomAll();
+        if (ctrl && e.key === "b") zoomToSelection();
 
         if (e.shiftKey && e.key === "ArrowLeft") {
           e.preventDefault();
@@ -301,7 +298,7 @@ const Timeline = forwardRef(
             { label: "Zoom In (Ctrl+I)", action: zoomIn },
             { label: "Zoom Out (Ctrl+O)", action: zoomOut },
             { label: "Zoom All (Ctrl+A)", action: zoomAll },
-            { label: "Zoom Select (Ctrl+N)", action: zoomToSelection },
+            { label: "Zoom Select (Ctrl+B)", action: zoomToSelection },
             { label: "◀ (Shift+←)", action: panLeft },
             { label: "▶ (Shift+→)", action: panRight },
           ].map(({ label, action }) => (

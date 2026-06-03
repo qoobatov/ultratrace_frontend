@@ -8,7 +8,17 @@ import {
 import { getAudioUrl, getAudioInfo } from "../../api/client";
 
 const AudioPlayer = forwardRef(
-  ({ onTimeUpdate, onDurationLoaded, onPlayStateChange }, ref) => {
+  (
+    {
+      onTimeUpdate,
+      onDurationLoaded,
+      onPlayStateChange,
+      onStop,
+      onPlay,
+      isPlayingExternal,
+    },
+    ref,
+  ) => {
     const audioRef = useRef(null);
     const [playing, setPlaying] = useState(false);
     const [duration, setDuration] = useState(0);
@@ -21,16 +31,23 @@ const AudioPlayer = forwardRef(
       });
     }, []);
 
+    const displayPlaying = isPlayingExternal ?? playing;
+
     const togglePlay = () => {
       if (!audioRef.current) return;
-      if (playing) {
+      if (displayPlaying) {
         audioRef.current.pause();
+        setPlaying(false);
+        onPlayStateChange && onPlayStateChange(false);
       } else {
-        audioRef.current.play();
+        if (onPlay) {
+          onPlay();
+        } else {
+          audioRef.current.play();
+          setPlaying(true);
+          onPlayStateChange && onPlayStateChange(true);
+        }
       }
-      const newState = !playing;
-      setPlaying(newState);
-      onPlayStateChange && onPlayStateChange(newState);
     };
 
     const stop = () => {
@@ -41,6 +58,7 @@ const AudioPlayer = forwardRef(
       setCurrentTime(0);
       onTimeUpdate && onTimeUpdate(0);
       onPlayStateChange && onPlayStateChange(false);
+      onStop && onStop();
     };
 
     const handleTimeUpdate = () => {
@@ -61,7 +79,20 @@ const AudioPlayer = forwardRef(
           setCurrentTime(time);
         }
       },
-      getCurrentTime: () => audioRef.current?.currentTime || 0,
+      getCurrentTime: () => audioRef.current?.currentTime ?? 0,
+      play() {
+        if (!audioRef.current) return;
+        audioRef.current.play();
+        setPlaying(true);
+        onPlayStateChange && onPlayStateChange(true);
+      },
+      pause() {
+        if (!audioRef.current) return;
+        audioRef.current.pause();
+        setPlaying(false);
+        onPlayStateChange && onPlayStateChange(false);
+      },
+      isPlaying: () => playing,
     }));
 
     return (
@@ -80,7 +111,7 @@ const AudioPlayer = forwardRef(
           onEnded={handleEnded}
           preload="auto"
         />
-        <button onClick={togglePlay}>{playing ? "⏸️" : "▶️"}</button>
+        <button onClick={togglePlay}>{displayPlaying ? "⏸️" : "▶️"}</button>
         <button onClick={stop}>⏹️</button>
         <span>
           {formatTime(currentTime)} / {formatTime(duration)}

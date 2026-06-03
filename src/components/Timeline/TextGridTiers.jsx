@@ -7,6 +7,7 @@ const TextGridTiers = ({
   onSelectInterval,
   viewStart,
   viewEnd,
+  selectedInterval,
 }) => {
   const [tiers, setTiers] = useState({});
 
@@ -40,10 +41,8 @@ const TextGridTiers = ({
             }}
           >
             {intervals
-              // Отбрасываем интервалы полностью за пределами окна
               .filter((iv) => iv.end > effStart && iv.start < effEnd)
               .map((interval, idx) => {
-                // Обрезаем по границам окна
                 const clampedStart = Math.max(interval.start, effStart);
                 const clampedEnd = Math.min(interval.end, effEnd);
 
@@ -54,8 +53,20 @@ const TextGridTiers = ({
                   ? ((clampedEnd - clampedStart) / viewDuration) * 100
                   : 0;
 
-                const isActive =
-                  currentTime >= interval.start && currentTime < interval.end;
+                const isSelected =
+                  selectedInterval &&
+                  selectedInterval.start === interval.start &&
+                  selectedInterval.end === interval.end &&
+                  selectedInterval.tier === interval.tier;
+
+                const isCurrent =
+                  !isSelected &&
+                  currentTime >= interval.start &&
+                  currentTime < interval.end;
+
+                let background = "#ddd";
+                if (isSelected) background = "#88aaff";
+                else if (isCurrent) background = "#cce";
 
                 return (
                   <div
@@ -68,14 +79,15 @@ const TextGridTiers = ({
                       left: `${left}%`,
                       width: `${width}%`,
                       height: "100%",
-                      background: isActive ? "#aaf" : "#ddd",
-                      border: "1px solid #999",
+                      background,
+                      border: isSelected ? "1px solid #336" : "1px solid #999",
                       overflow: "hidden",
                       textOverflow: "ellipsis",
                       whiteSpace: "nowrap",
                       cursor: "pointer",
                       padding: "0 2px",
                       boxSizing: "border-box",
+                      fontWeight: isSelected ? "bold" : "normal",
                     }}
                     title={interval.text}
                   >

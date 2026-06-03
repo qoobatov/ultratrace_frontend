@@ -32,35 +32,28 @@ const Timeline = forwardRef(
     const [duration, setDuration] = useState(0);
     const [isDragging, setIsDragging] = useState(false);
     const [isPlaying, setIsPlaying] = useState(false);
-
-    // ── Состояние окна просмотра ──────────────────────────────────────────
-    // null означает "показывать всё"
     const [viewStart, setViewStart] = useState(null);
     const [viewEnd, setViewEnd] = useState(null);
-
-    // selectedInterval — интервал, выделенный кликом в TextGridTiers
-    // формат: { start: number, end: number } | null
     const [selectedInterval, setSelectedInterval] = useState(null);
 
     const audioRef = useRef(null);
     const offsetPanelRef = useRef(null);
     const currentFrameRef = useRef(frame);
+    const playingSelectionRef = useRef(false);
+    const stopCheckRef = useRef(null);
 
     useEffect(() => {
       currentFrameRef.current = frame;
     }, [frame]);
 
-    // ── Вспомогательные геттеры ───────────────────────────────────────────
-    const effectiveStart = viewStart ?? 0;
-    const effectiveEnd = viewEnd ?? duration;
+    const effStart = viewStart ?? 0;
+    const effEnd = viewEnd ?? duration;
 
-    // Clamp — не выходим за границы аудио
     const clampView = useCallback(
       (start, end) => {
         const len = end - start;
         let s = Math.max(0, start);
         let e = Math.min(duration || 1, end);
-        // если сдвинули у края — сохраняем длину окна
         if (s === 0) e = Math.min(duration || 1, len);
         if (e === (duration || 1)) s = Math.max(0, (duration || 1) - len);
         return [s, e];
@@ -68,25 +61,22 @@ const Timeline = forwardRef(
       [duration],
     );
 
-    // ── Zoom-команды (аналог getBounds из оригинала) ──────────────────────
+    // ── Zoom ─────────────────────────────────────────────────────────────
     const zoomIn = useCallback(() => {
-      const a = effectiveEnd - effectiveStart;
-      const zoomOut = (a - a / TG_ZOOM_FACTOR) / 2;
-      const [s, e] = clampView(
-        effectiveStart + zoomOut,
-        effectiveEnd - zoomOut,
-      );
+      const a = effEnd - effStart;
+      const delta = (a - a / TG_ZOOM_FACTOR) / 2;
+      const [s, e] = clampView(effStart + delta, effEnd - delta);
       setViewStart(s);
       setViewEnd(e);
-    }, [effectiveStart, effectiveEnd, clampView]);
+    }, [effStart, effEnd, clampView]);
 
     const zoomOut = useCallback(() => {
-      const a = effectiveEnd - effectiveStart;
-      const zoomIn = (TG_ZOOM_FACTOR * a - a) / 2;
-      const [s, e] = clampView(effectiveStart - zoomIn, effectiveEnd + zoomIn);
+      const a = effEnd - effStart;
+      const delta = (TG_ZOOM_FACTOR * a - a) / 2;
+      const [s, e] = clampView(effStart - delta, effEnd + delta);
       setViewStart(s);
       setViewEnd(e);
-    }, [effectiveStart, effectiveEnd, clampView]);
+    }, [effStart, effEnd, clampView]);
 
     const zoomAll = useCallback(() => {
       setViewStart(null);
@@ -96,8 +86,7 @@ const Timeline = forwardRef(
     const zoomToSelection = useCallback(() => {
       if (!selectedInterval) return;
       const intervalDuration = selectedInterval.end - selectedInterval.start;
-      // Добавляем 10% отступ с каждой стороны
-      const padding = intervalDuration * 10;
+      const padding = intervalDuration * 0.1;
       const [s, e] = clampView(
         selectedInterval.start - padding,
         selectedInterval.end + padding,
@@ -106,29 +95,82 @@ const Timeline = forwardRef(
       setViewEnd(e);
     }, [selectedInterval, clampView]);
 
-    // Сдвиг влево/вправо (Shift+Arrow — как в оригинале)
     const panLeft = useCallback(() => {
-      const a = effectiveEnd - effectiveStart;
+      const a = effEnd - effStart;
       const step = a / (10 * TG_ZOOM_FACTOR);
-      const [s, e] = clampView(effectiveStart - step, effectiveEnd - step);
+      const [s, e] = clampView(effStart - step, effEnd - step);
       setViewStart(s);
       setViewEnd(e);
-    }, [effectiveStart, effectiveEnd, clampView]);
+    }, [effStart, effEnd, clampView]);
 
     const panRight = useCallback(() => {
-      const a = effectiveEnd - effectiveStart;
+      const a = effEnd - effStart;
       const step = a / (10 * TG_ZOOM_FACTOR);
-      const [s, e] = clampView(effectiveStart + step, effectiveEnd + step);
+      const [s, e] = clampView(effStart + step, effEnd + step);
       setViewStart(s);
       setViewEnd(e);
-    }, [effectiveStart, effectiveEnd, clampView]);
+    }, [effStart, effEnd, clampView]);
 
-    // ── Клавиатурные биндинги ─────────────────────────────────────────────
+    // ── Play selection ────────────────────────────────────────────────────
+    const stopSelection = useCallback(() => {
+      if (stopCheckRef.current) {
+        clearInterval(stopCheckRef.current);
+        stopCheckRef.current = null;
+      }
+      playingSelectionRef.current = false;
+      audioRef.current?.pause();
+    }, []);
+
+    const playInterval = useCallback((interval) => {
+      if (!audioRef.current || !interval) return;
+      if (stopCheckRef.current) clearInterval(stopCheckRef.current);
+      playingSelectionRef.current = false;
+
+      audioRef.current.seek(interval.start);
+      audioRef.current.play();
+      playingSelectionRef.current = true;
+
+      stopCheckRef.current = setInterval(() => {
+        if (!audioRef.current) {
+          clearInterval(stopCheckRef.current);
+          return;
+        }
+        const t = audioRef.current.getCurrentTime();
+        // Останавливаем за 8мс до конца — компенсируем задержку setInterval
+        if (t >= interval.end - 0.002) {
+          audioRef.current.pause();
+          audioRef.current.seek(interval.start);
+          playingSelectionRef.current = false;
+          clearInterval(stopCheckRef.current);
+          stopCheckRef.current = null;
+        }
+      }, 2); // 4мс вместо 16мс — точнее ловим границу
+    }, []);
+
+    const handlePlaySelection = useCallback(() => {
+      if (!selectedInterval) return;
+      if (playingSelectionRef.current) {
+        stopSelection();
+        return;
+      }
+      playInterval(selectedInterval);
+    }, [selectedInterval, stopSelection, playInterval]);
+
+    useEffect(() => {
+      return () => {
+        if (stopCheckRef.current) clearInterval(stopCheckRef.current);
+      };
+    }, []);
+
+    // ── Клавиатура ────────────────────────────────────────────────────────
     useEffect(() => {
       const onKeyDown = (e) => {
         const ctrl = e.ctrlKey || e.metaKey;
 
-        if (ctrl && ["i", "o", "a", "e"].includes(e.key)) {
+        if (ctrl && ["i", "o", "a", "b"].includes(e.key)) {
+          e.preventDefault();
+        }
+        if (e.key === " " && selectedInterval) {
           e.preventDefault();
         }
 
@@ -144,6 +186,10 @@ const Timeline = forwardRef(
         if (ctrl && e.key === "a") zoomAll();
         if (ctrl && e.key === "b") zoomToSelection();
 
+        if (e.key === " ") {
+          if (selectedInterval) handlePlaySelection();
+        }
+
         if (e.shiftKey && e.key === "ArrowLeft") {
           e.preventDefault();
           panLeft();
@@ -156,9 +202,18 @@ const Timeline = forwardRef(
 
       window.addEventListener("keydown", onKeyDown);
       return () => window.removeEventListener("keydown", onKeyDown);
-    }, [zoomIn, zoomOut, zoomAll, zoomToSelection, panLeft, panRight]);
+    }, [
+      zoomIn,
+      zoomOut,
+      zoomAll,
+      zoomToSelection,
+      panLeft,
+      panRight,
+      handlePlaySelection,
+      selectedInterval,
+    ]);
 
-    // ── Остальные обработчики (без изменений) ─────────────────────────────
+    // ── Обработчики ───────────────────────────────────────────────────────
     const handleTimeUpdate = useCallback(
       (time) => {
         setCurrentTime(time);
@@ -184,11 +239,20 @@ const Timeline = forwardRef(
 
     const handleSelectInterval = useCallback(
       (interval) => {
-        setSelectedInterval(interval); // запоминаем для Ctrl+N
+        setSelectedInterval(interval);
         handleSeek(interval.start);
       },
       [handleSeek],
     );
+
+    const handleStop = useCallback(() => {
+      setSelectedInterval(null);
+      if (stopCheckRef.current) {
+        clearInterval(stopCheckRef.current);
+        stopCheckRef.current = null;
+      }
+      playingSelectionRef.current = false;
+    }, []);
 
     useImperativeHandle(
       ref,
@@ -204,7 +268,6 @@ const Timeline = forwardRef(
           }
         },
         isPlaying: () => isPlaying,
-        // Экспортируем zoom-функции, если понадобятся снаружи
         zoomIn,
         zoomOut,
         zoomAll,
@@ -220,9 +283,7 @@ const Timeline = forwardRef(
         const rect = panel.getBoundingClientRect();
         const x = e.clientX - rect.left;
         const ratio = Math.max(0, Math.min(1, x / rect.width));
-        // Учитываем видимый диапазон
-        const newTime =
-          effectiveStart + ratio * (effectiveEnd - effectiveStart);
+        const newTime = effStart + ratio * (effEnd - effStart);
         setCurrentTime(newTime);
         const calcFrame = getFrameAtTime(newTime, frameTimes);
         if (calcFrame !== currentFrameRef.current) {
@@ -230,7 +291,7 @@ const Timeline = forwardRef(
           setFrame(calcFrame);
         }
       },
-      [duration, frameTimes, setFrame, effectiveStart, effectiveEnd],
+      [duration, frameTimes, setFrame, effStart, effEnd],
     );
 
     const handleMouseDownOnOffset = (e) => {
@@ -265,13 +326,11 @@ const Timeline = forwardRef(
 
     const handlePlayStateChange = useCallback((playing) => {
       setIsPlaying(playing);
+      if (!playing) playingSelectionRef.current = false;
     }, []);
 
-    // Позиция курсора в координатах текущего окна (для красной линии)
     const cursorRatio =
-      effectiveEnd > effectiveStart
-        ? (currentTime - effectiveStart) / (effectiveEnd - effectiveStart)
-        : 0;
+      effEnd > effStart ? (currentTime - effStart) / (effEnd - effStart) : 0;
     const cursorVisible = cursorRatio >= 0 && cursorRatio <= 1;
 
     return (
@@ -285,13 +344,12 @@ const Timeline = forwardRef(
           flexDirection: "column",
         }}
       >
-        {/* Кнопки зума */}
         <div
           style={{
             display: "flex",
             gap: "4px",
             padding: "4px 8px 0",
-            fontSize: "11px",
+            flexWrap: "wrap",
           }}
         >
           {[
@@ -301,18 +359,25 @@ const Timeline = forwardRef(
             { label: "Zoom Select (Ctrl+B)", action: zoomToSelection },
             { label: "◀ (Shift+←)", action: panLeft },
             { label: "▶ (Shift+→)", action: panRight },
-          ].map(({ label, action }) => (
+            {
+              label: selectedInterval ? "▶ Selection (Space)" : "▶ Selection",
+              action: handlePlaySelection,
+              disabled: !selectedInterval,
+            },
+          ].map(({ label, action, disabled }) => (
             <button
               key={label}
               onClick={action}
+              disabled={disabled}
               title={label}
               style={{
                 fontSize: "10px",
                 padding: "1px 6px",
-                cursor: "pointer",
+                cursor: disabled ? "default" : "pointer",
                 background: "#e8e8e8",
                 border: "1px solid #bbb",
                 borderRadius: "3px",
+                opacity: disabled ? 0.5 : 1,
               }}
             >
               {label}
@@ -325,8 +390,8 @@ const Timeline = forwardRef(
             duration={duration}
             currentTime={currentTime}
             spectrogramParams={spectrogramParams}
-            viewStart={effectiveStart}
-            viewEnd={effectiveEnd}
+            viewStart={effStart}
+            viewEnd={effEnd}
           />
         </div>
         <div style={{ padding: "8px", paddingBottom: 0 }}>
@@ -335,6 +400,11 @@ const Timeline = forwardRef(
             onTimeUpdate={handleTimeUpdate}
             onDurationLoaded={setDuration}
             onPlayStateChange={handlePlayStateChange}
+            onStop={handleStop}
+            onPlay={() => {
+              if (selectedInterval) playInterval(selectedInterval);
+            }}
+            isPlayingExternal={isPlaying}
           />
           <TimelineBar
             duration={duration}
@@ -342,18 +412,18 @@ const Timeline = forwardRef(
             onSeek={handleSeek}
             frameTimes={frameTimes}
             onFrameChange={setFrame}
-            viewStart={effectiveStart}
-            viewEnd={effectiveEnd}
+            viewStart={effStart}
+            viewEnd={effEnd}
           />
           <TextGridTiers
             currentTime={currentTime}
             duration={duration}
             onSelectInterval={handleSelectInterval}
-            viewStart={effectiveStart}
-            viewEnd={effectiveEnd}
+            viewStart={effStart}
+            viewEnd={effEnd}
+            selectedInterval={selectedInterval}
           />
 
-          {/* Полоска-скруббер с учётом окна просмотра */}
           <div
             ref={offsetPanelRef}
             onMouseDown={handleMouseDownOnOffset}
@@ -367,15 +437,14 @@ const Timeline = forwardRef(
               borderRadius: "2px",
             }}
           >
-            {/* Серая подложка показывает, какая часть аудио сейчас видна */}
             {duration > 0 && (
               <div
                 style={{
                   position: "absolute",
                   top: 0,
                   bottom: 0,
-                  left: `${(effectiveStart / duration) * 100}%`,
-                  right: `${((duration - effectiveEnd) / duration) * 100}%`,
+                  left: `${(effStart / duration) * 100}%`,
+                  right: `${((duration - effEnd) / duration) * 100}%`,
                   background: "rgba(100,150,255,0.18)",
                   borderRadius: "2px",
                   pointerEvents: "none",

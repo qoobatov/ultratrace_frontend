@@ -67,6 +67,8 @@ export const savePoints = async (traceName, frameNumber, points) => {
 
 // --- Аудио ---
 export const getAudioUrl = () => `${API_BASE}/audio/file`;
+export const getAudioSegmentUrl = (start, end) =>
+  `${API_BASE}/audio/segment?start=${start}&end=${end}`;
 export const getAudioInfo = async () => {
   const response = await client.get("/audio/info");
   return response.data;

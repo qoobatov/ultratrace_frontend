@@ -20,6 +20,7 @@ const AudioPlayer = forwardRef(
     ref,
   ) => {
     const audioRef = useRef(null);
+    const segmentAudioRef = useRef(null); // отдельный элемент для сегментов
     const [playing, setPlaying] = useState(false);
     const [duration, setDuration] = useState(0);
     const [currentTime, setCurrentTime] = useState(0);
@@ -29,21 +30,33 @@ const AudioPlayer = forwardRef(
         setDuration(info.duration);
         onDurationLoaded && onDurationLoaded(info.duration);
       });
+
+      // Создаём скрытый audio элемент для сегментов
+      const segAudio = new Audio();
+      segAudio.preload = "auto";
+      segmentAudioRef.current = segAudio;
+
+      return () => {
+        if (segmentAudioRef.current) {
+          segmentAudioRef.current.pause();
+          segmentAudioRef.current = null;
+        }
+      };
     }, []);
 
-    const displayPlaying = isPlayingExternal ?? playing;
-
     const togglePlay = () => {
-      if (!audioRef.current) return;
+      const displayPlaying = isPlayingExternal ?? playing;
       if (displayPlaying) {
-        audioRef.current.pause();
+        // Пауза — останавливаем и основной и сегментный
+        if (audioRef.current) audioRef.current.pause();
+        if (segmentAudioRef.current) segmentAudioRef.current.pause();
         setPlaying(false);
         onPlayStateChange && onPlayStateChange(false);
       } else {
         if (onPlay) {
           onPlay();
         } else {
-          audioRef.current.play();
+          if (audioRef.current) audioRef.current.play();
           setPlaying(true);
           onPlayStateChange && onPlayStateChange(true);
         }
@@ -51,9 +64,14 @@ const AudioPlayer = forwardRef(
     };
 
     const stop = () => {
-      if (!audioRef.current) return;
-      audioRef.current.pause();
-      audioRef.current.currentTime = 0;
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+      }
+      if (segmentAudioRef.current) {
+        segmentAudioRef.current.pause();
+        segmentAudioRef.current.src = "";
+      }
       setPlaying(false);
       setCurrentTime(0);
       onTimeUpdate && onTimeUpdate(0);
@@ -87,13 +105,36 @@ const AudioPlayer = forwardRef(
         onPlayStateChange && onPlayStateChange(true);
       },
       pause() {
-        if (!audioRef.current) return;
-        audioRef.current.pause();
+        if (audioRef.current) audioRef.current.pause();
+        if (segmentAudioRef.current) segmentAudioRef.current.pause();
         setPlaying(false);
         onPlayStateChange && onPlayStateChange(false);
       },
       isPlaying: () => playing,
+
+      // Играем точный сегмент через отдельный audio элемент
+      playSegmentUrl(url) {
+        if (!segmentAudioRef.current) return;
+
+        // Останавливаем основное аудио
+        if (audioRef.current) audioRef.current.pause();
+
+        const seg = segmentAudioRef.current;
+        seg.src = url;
+        seg.currentTime = 0;
+        seg.play();
+
+        setPlaying(true);
+        onPlayStateChange && onPlayStateChange(true);
+
+        seg.onended = () => {
+          setPlaying(false);
+          onPlayStateChange && onPlayStateChange(false);
+        };
+      },
     }));
+
+    const displayPlaying = isPlayingExternal ?? playing;
 
     return (
       <div

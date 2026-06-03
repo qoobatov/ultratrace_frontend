@@ -10,6 +10,7 @@ import AudioPlayer from "./AudioPlayer";
 import TimelineBar from "./TimelineBar";
 import TextGridTiers from "./TextGridTiers";
 import SpectrogramView from "./SpectrogramView";
+import { getAudioSegmentUrl } from "../../api/client"; // ← добавить
 
 const TG_ZOOM_FACTOR = 1.5;
 
@@ -114,37 +115,23 @@ const Timeline = forwardRef(
     // ── Play selection ────────────────────────────────────────────────────
     const stopSelection = useCallback(() => {
       if (stopCheckRef.current) {
-        clearInterval(stopCheckRef.current);
+        clearTimeout(stopCheckRef.current);
         stopCheckRef.current = null;
       }
       playingSelectionRef.current = false;
       audioRef.current?.pause();
     }, []);
 
+    // Играем точный сегмент с бэкенда — без таймеров, без захвата соседних звуков
     const playInterval = useCallback((interval) => {
       if (!audioRef.current || !interval) return;
-      if (stopCheckRef.current) clearInterval(stopCheckRef.current);
-      playingSelectionRef.current = false;
-
-      audioRef.current.seek(interval.start);
-      audioRef.current.play();
+      if (stopCheckRef.current) {
+        clearTimeout(stopCheckRef.current);
+        stopCheckRef.current = null;
+      }
+      const url = getAudioSegmentUrl(interval.start, interval.end);
+      audioRef.current.playSegmentUrl(url);
       playingSelectionRef.current = true;
-
-      stopCheckRef.current = setInterval(() => {
-        if (!audioRef.current) {
-          clearInterval(stopCheckRef.current);
-          return;
-        }
-        const t = audioRef.current.getCurrentTime();
-        // Останавливаем за 8мс до конца — компенсируем задержку setInterval
-        if (t >= interval.end - 0.002) {
-          audioRef.current.pause();
-          audioRef.current.seek(interval.start);
-          playingSelectionRef.current = false;
-          clearInterval(stopCheckRef.current);
-          stopCheckRef.current = null;
-        }
-      }, 2); // 4мс вместо 16мс — точнее ловим границу
     }, []);
 
     const handlePlaySelection = useCallback(() => {
@@ -158,7 +145,7 @@ const Timeline = forwardRef(
 
     useEffect(() => {
       return () => {
-        if (stopCheckRef.current) clearInterval(stopCheckRef.current);
+        if (stopCheckRef.current) clearTimeout(stopCheckRef.current);
       };
     }, []);
 
@@ -248,7 +235,7 @@ const Timeline = forwardRef(
     const handleStop = useCallback(() => {
       setSelectedInterval(null);
       if (stopCheckRef.current) {
-        clearInterval(stopCheckRef.current);
+        clearTimeout(stopCheckRef.current);
         stopCheckRef.current = null;
       }
       playingSelectionRef.current = false;

@@ -10,7 +10,7 @@ import AudioPlayer from "./AudioPlayer";
 import TimelineBar from "./TimelineBar";
 import TextGridTiers from "./TextGridTiers";
 import SpectrogramView from "./SpectrogramView";
-import { getAudioSegmentUrl } from "../../api/client"; // ← добавить
+import { getAudioSegmentUrl } from "../../api/client";
 
 const TG_ZOOM_FACTOR = 1.5;
 
@@ -122,7 +122,6 @@ const Timeline = forwardRef(
       audioRef.current?.pause();
     }, []);
 
-    // Играем точный сегмент с бэкенда — без таймеров, без захвата соседних звуков
     const playInterval = useCallback((interval) => {
       if (!audioRef.current || !interval) return;
       if (stopCheckRef.current) {
@@ -130,7 +129,8 @@ const Timeline = forwardRef(
         stopCheckRef.current = null;
       }
       const url = getAudioSegmentUrl(interval.start, interval.end);
-      audioRef.current.playSegmentUrl(url);
+      // Передаём offset чтобы таймер показывал абсолютное время
+      audioRef.current.playSegmentUrl(url, interval.start);
       playingSelectionRef.current = true;
     }, []);
 

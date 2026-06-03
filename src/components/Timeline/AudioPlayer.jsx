@@ -20,7 +20,7 @@ const AudioPlayer = forwardRef(
     ref,
   ) => {
     const audioRef = useRef(null);
-    const segmentAudioRef = useRef(null); // отдельный элемент для сегментов
+    const segmentAudioRef = useRef(null);
     const [playing, setPlaying] = useState(false);
     const [duration, setDuration] = useState(0);
     const [currentTime, setCurrentTime] = useState(0);
@@ -31,7 +31,6 @@ const AudioPlayer = forwardRef(
         onDurationLoaded && onDurationLoaded(info.duration);
       });
 
-      // Создаём скрытый audio элемент для сегментов
       const segAudio = new Audio();
       segAudio.preload = "auto";
       segmentAudioRef.current = segAudio;
@@ -47,7 +46,6 @@ const AudioPlayer = forwardRef(
     const togglePlay = () => {
       const displayPlaying = isPlayingExternal ?? playing;
       if (displayPlaying) {
-        // Пауза — останавливаем и основной и сегментный
         if (audioRef.current) audioRef.current.pause();
         if (segmentAudioRef.current) segmentAudioRef.current.pause();
         setPlaying(false);
@@ -70,6 +68,8 @@ const AudioPlayer = forwardRef(
       }
       if (segmentAudioRef.current) {
         segmentAudioRef.current.pause();
+        segmentAudioRef.current.ontimeupdate = null;
+        segmentAudioRef.current.onended = null;
         segmentAudioRef.current.src = "";
       }
       setPlaying(false);
@@ -106,31 +106,47 @@ const AudioPlayer = forwardRef(
       },
       pause() {
         if (audioRef.current) audioRef.current.pause();
-        if (segmentAudioRef.current) segmentAudioRef.current.pause();
+        if (segmentAudioRef.current) {
+          segmentAudioRef.current.pause();
+          segmentAudioRef.current.ontimeupdate = null;
+        }
         setPlaying(false);
         onPlayStateChange && onPlayStateChange(false);
       },
       isPlaying: () => playing,
 
-      // Играем точный сегмент через отдельный audio элемент
-      playSegmentUrl(url) {
+      playSegmentUrl(url, offset = 0) {
         if (!segmentAudioRef.current) return;
 
         // Останавливаем основное аудио
         if (audioRef.current) audioRef.current.pause();
 
         const seg = segmentAudioRef.current;
+
+        // Чистим предыдущие обработчики
+        seg.ontimeupdate = null;
+        seg.onended = null;
+        seg.pause();
+
         seg.src = url;
         seg.currentTime = 0;
-        seg.play();
 
-        setPlaying(true);
-        onPlayStateChange && onPlayStateChange(true);
+        // Время сегмента идёт от 0, добавляем offset чтобы получить абсолютное время
+        seg.ontimeupdate = () => {
+          const absTime = offset + seg.currentTime;
+          setCurrentTime(absTime);
+          onTimeUpdate && onTimeUpdate(absTime);
+        };
 
         seg.onended = () => {
+          seg.ontimeupdate = null;
           setPlaying(false);
           onPlayStateChange && onPlayStateChange(false);
         };
+
+        seg.play();
+        setPlaying(true);
+        onPlayStateChange && onPlayStateChange(true);
       },
     }));
 

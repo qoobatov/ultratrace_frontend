@@ -11,6 +11,7 @@ import {
   getTextGridIntervals,
   getFrameTimes,
 } from "../../api/client";
+import "./Sidebar.css";
 
 const DEFAULT_SPECTROGRAM_PARAMS = {
   freq_max: 5000,
@@ -40,7 +41,6 @@ const Sidebar = ({
     spectrogramParams || DEFAULT_SPECTROGRAM_PARAMS,
   );
   const [localOffset, setLocalOffset] = useState(offset || 0);
-
   const [tierStats, setTierStats] = useState({});
   const [totalFrames, setTotalFrames] = useState(0);
 
@@ -66,12 +66,10 @@ const Sidebar = ({
   }, []);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (spectrogramParams) setLocalSpecParams(spectrogramParams);
   }, [spectrogramParams]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLocalOffset(offset);
   }, [offset]);
 
@@ -93,7 +91,6 @@ const Sidebar = ({
   }, [activeTrace, onSelectTrace, initialized]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchTraces();
   }, []);
 
@@ -160,7 +157,7 @@ const Sidebar = ({
     if (!activeTrace || !frameNumber) return;
     if (
       !window.confirm(
-        `Clear all points for trace "${activeTrace}" on frame ${frameNumber}?`,
+        `Clear points for "${activeTrace}" on frame ${frameNumber}?`,
       )
     )
       return;
@@ -175,7 +172,6 @@ const Sidebar = ({
   const handleSpecChange = (field, value) => {
     const newParams = { ...localSpecParams, [field]: value };
     setLocalSpecParams(newParams);
-    onSpectrogramParamsChange?.(newParams);
   };
 
   const handleSpecReset = () => {
@@ -190,200 +186,134 @@ const Sidebar = ({
   const displayTiers = ["sentence", "word", "orthographic vowel"];
 
   return (
-    <div
-      style={{
-        padding: "1rem",
-        background: "#f5f5f5",
-        height: "100%",
-        minWidth: "220px",
-        display: "flex",
-        flexDirection: "column",
-      }}
-    >
-      <h3>Landmarks</h3>
-      <div
-        style={{
-          flex: 1,
-          overflowY: "auto",
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        <ul style={{ listStyle: "none", padding: 0 }}>
-          {traces.map((name) => (
-            <li
-              key={name}
-              style={{
-                padding: "4px 8px",
-                cursor: "pointer",
-                background: name === activeTrace ? "#d0d0ff" : "transparent",
-                borderRadius: "4px",
-                marginBottom: "2px",
-                display: "flex",
-                alignItems: "center",
-                gap: "4px",
-              }}
-            >
-              <span
-                style={{
-                  display: "inline-block",
-                  width: 12,
-                  height: 12,
-                  borderRadius: "50%",
-                  background: traceColors[name] || "gray",
-                  marginRight: 6,
-                }}
-              />
-              {renameTarget === name ? (
-                <input
-                  value={renameValue}
-                  onChange={(e) => setRenameValue(e.target.value)}
-                  onBlur={() => setRenameTarget(null)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleRename(name);
-                    if (e.key === "Escape") setRenameTarget(null);
-                  }}
-                  autoFocus
-                  style={{ width: "100%" }}
+    <div className="sidebar">
+      <div className="sidebar-scroll">
+        {/* ── Landmarks ── */}
+        <div className="sidebar-section">
+          <div className="sidebar-section-title">Landmarks</div>
+          <ul className="trace-list">
+            {traces.map((name) => (
+              <li
+                key={name}
+                className={`trace-item ${name === activeTrace ? "active" : ""}`}
+              >
+                <span
+                  className="trace-dot"
+                  style={{ background: traceColors[name] || "#6c7086" }}
                 />
-              ) : (
-                <span onClick={() => onSelectTrace(name)} style={{ flex: 1 }}>
-                  {name}
-                </span>
-              )}
-              {name === defaultTraceName ? (
-                <span title="Default trace" style={{ color: "gold" }}>
-                  ⭐
-                </span>
-              ) : (
+                {renameTarget === name ? (
+                  <input
+                    className="trace-rename-input"
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    onBlur={() => setRenameTarget(null)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleRename(name);
+                      if (e.key === "Escape") setRenameTarget(null);
+                    }}
+                    autoFocus
+                  />
+                ) : (
+                  <span
+                    className="trace-name"
+                    onClick={() => onSelectTrace(name)}
+                  >
+                    {name}
+                  </span>
+                )}
                 <button
+                  className={`icon-btn ${name === defaultTraceName ? "active-star" : ""}`}
                   onClick={() => handleSetDefault(name)}
                   title="Set as default"
-                  style={{
-                    cursor: "pointer",
-                    background: "none",
-                    border: "none",
-                    padding: "0 2px",
-                    opacity: 0.5,
-                  }}
                 >
-                  ⭐
+                  ★
                 </button>
-              )}
-              <button
-                onClick={() => {
-                  setRenameTarget(name);
-                  setRenameValue(name);
-                }}
-                title="Rename"
-                style={{
-                  cursor: "pointer",
-                  background: "none",
-                  border: "none",
-                  padding: "0 2px",
-                }}
-              >
-                ✏️
-              </button>
-              <button
-                onClick={() => setColorPickerVisible(name)}
-                title="Change color"
-                style={{
-                  cursor: "pointer",
-                  background: "none",
-                  border: "none",
-                  padding: "0 2px",
-                }}
-              >
-                🎨
-              </button>
-              <button
-                onClick={() => handleDelete(name)}
-                title="Delete trace"
-                style={{
-                  cursor: "pointer",
-                  background: "none",
-                  border: "none",
-                  padding: "0 2px",
-                }}
-              >
-                🗑️
-              </button>
-            </li>
-          ))}
-        </ul>
+                <button
+                  className="icon-btn"
+                  onClick={() => {
+                    setRenameTarget(name);
+                    setRenameValue(name);
+                  }}
+                  title="Rename"
+                >
+                  ✎
+                </button>
+                <button
+                  className="icon-btn"
+                  onClick={() => setColorPickerVisible(name)}
+                  title="Change color"
+                >
+                  ◉
+                </button>
+                <button
+                  className="icon-btn"
+                  onClick={() => handleDelete(name)}
+                  title="Delete"
+                >
+                  ✕
+                </button>
+              </li>
+            ))}
+          </ul>
 
-        <div style={{ marginTop: "8px", display: "flex", gap: "4px" }}>
-          <input
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleCreate()}
-            placeholder="New trace name"
-            style={{ flex: 1 }}
-          />
-          <button onClick={handleCreate}>Add</button>
+          <div className="add-trace-row">
+            <input
+              className="sidebar-input"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleCreate()}
+              placeholder="New trace name"
+            />
+            <button className="sidebar-btn" onClick={handleCreate}>
+              Add
+            </button>
+          </div>
+
+          <div className="sidebar-btn-row">
+            <button
+              className="sidebar-btn danger"
+              onClick={handleClearFrame}
+              disabled={!activeTrace}
+              title="Clear current frame"
+            >
+              Clear Frame
+            </button>
+            <button
+              className="sidebar-btn danger"
+              disabled={!activeTrace}
+              onClick={() => {
+                if (!activeTrace) return;
+                if (!window.confirm(`Remove all points for "${activeTrace}"?`))
+                  return;
+                clearAllPoints(activeTrace).then(() => onTracesUpdate?.());
+              }}
+              title="Clear all frames"
+            >
+              Clear All
+            </button>
+          </div>
         </div>
 
-        <div
-          style={{
-            marginTop: "12px",
-            borderTop: "1px solid #ccc",
-            paddingTop: "8px",
-          }}
-        >
-          <button
-            onClick={handleClearFrame}
-            disabled={!activeTrace}
-            style={{ width: "100%", marginBottom: "4px" }}
-          >
-            Clear Frame
-          </button>
-          <button
-            onClick={() => {
-              if (!activeTrace) return;
-              if (
-                !window.confirm(
-                  `Remove all points from all frames for trace "${activeTrace}"?`,
-                )
-              )
-                return;
-              clearAllPoints(activeTrace).then(() => onTracesUpdate?.());
-            }}
-            disabled={!activeTrace}
-            style={{ width: "100%" }}
-          >
-            Clear All Frames
-          </button>
-        </div>
-
-        {/* TextGrid statistics */}
-        <div
-          style={{
-            marginTop: "12px",
-            borderTop: "1px solid #ccc",
-            paddingTop: "8px",
-          }}
-        >
-          <h4 style={{ margin: "0 0 4px 0" }}>Annotations</h4>
+        {/* ── Annotations ── */}
+        <div className="sidebar-section">
+          <div className="sidebar-section-title">Annotations</div>
           {displayTiers.map((tierName) => (
-            <div key={tierName} style={{ marginBottom: "4px" }}>
-              {tierName} ({tierStats[tierName] || 0}/{totalFrames})
+            <div key={tierName} className="annotation-row">
+              <span>{tierName}</span>
+              <span className="annotation-badge">
+                {tierStats[tierName] || 0}/{totalFrames}
+              </span>
             </div>
           ))}
         </div>
 
-        {/* Spectrogram Settings */}
-        <div
-          style={{
-            marginTop: "12px",
-            borderTop: "1px solid #ccc",
-            paddingTop: "8px",
-          }}
-        >
-          <h4 style={{ margin: "0 0 4px 0" }}>Spectrogram</h4>
-          <label style={{ display: "block", marginBottom: "4px" }}>
-            Freq Max:{" "}
+        {/* ── Spectrogram ── */}
+        <div className="sidebar-section">
+          <div className="sidebar-section-title">Spectrogram</div>
+          <div className="param-row">
+            <span className="param-label">Freq Max</span>
             <input
+              className="param-input"
               type="number"
               value={localSpecParams.freq_max}
               onChange={(e) =>
@@ -391,12 +321,12 @@ const Sidebar = ({
               }
               step="100"
               min="0"
-              style={{ width: "80px", marginLeft: "4px" }}
             />
-          </label>
-          <label style={{ display: "block", marginBottom: "4px" }}>
-            Window:{" "}
+          </div>
+          <div className="param-row">
+            <span className="param-label">Window</span>
             <input
+              className="param-input"
               type="number"
               value={localSpecParams.window_length}
               onChange={(e) =>
@@ -407,12 +337,12 @@ const Sidebar = ({
               }
               step="0.001"
               min="0.001"
-              style={{ width: "80px", marginLeft: "4px" }}
             />
-          </label>
-          <label style={{ display: "block", marginBottom: "4px" }}>
-            Dyn Range:{" "}
+          </div>
+          <div className="param-row">
+            <span className="param-label">Dyn Range</span>
             <input
+              className="param-input"
               type="number"
               value={localSpecParams.dynamic_range}
               onChange={(e) =>
@@ -423,62 +353,67 @@ const Sidebar = ({
               }
               step="10"
               min="0"
-              style={{ width: "80px", marginLeft: "4px" }}
             />
-          </label>
-          <div style={{ marginTop: "4px", display: "flex", gap: "4px" }}>
-            <button onClick={handleSpecApply}>Apply</button>
-            <button onClick={handleSpecReset}>Standards</button>
+          </div>
+          <div className="sidebar-btn-row">
+            <button className="sidebar-btn" onClick={handleSpecApply}>
+              Apply
+            </button>
+            <button className="sidebar-btn" onClick={handleSpecReset}>
+              Reset
+            </button>
           </div>
         </div>
 
-        {/* Offset settings */}
-        <div
-          style={{
-            marginTop: "12px",
-            borderTop: "1px solid #ccc",
-            paddingTop: "8px",
-          }}
-        >
-          <h4 style={{ margin: "0 0 4px 0" }}>Offset</h4>
-          <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+        {/* ── Offset ── */}
+        <div className="sidebar-section">
+          <div className="sidebar-section-title">Offset</div>
+          <div className="offset-row">
             <input
+              className="sidebar-input"
               type="number"
               value={localOffset}
               onChange={(e) => setLocalOffset(Number(e.target.value))}
               step="1"
-              style={{ width: "80px" }}
             />
-            <span>ms</span>
+            <span className="offset-unit">ms</span>
           </div>
-          <div style={{ marginTop: "4px" }}>
-            <button onClick={() => onOffsetApply(localOffset)}>
-              Apply Offset
-            </button>
-          </div>
+          <button
+            className="sidebar-btn"
+            onClick={() => onOffsetApply(localOffset)}
+          >
+            Apply Offset
+          </button>
         </div>
       </div>
 
+      {/* ── Color picker modal ── */}
       {colorPickerVisible && (
         <div
-          style={{
-            position: "fixed",
-            top: "30%",
-            left: "30%",
-            background: "white",
-            padding: "1rem",
-            border: "1px solid #ccc",
-            zIndex: 10,
-          }}
+          className="color-picker-overlay"
+          onClick={() => setColorPickerVisible(null)}
         >
-          <h4>Pick color for {colorPickerVisible}</h4>
-          <input
-            type="color"
-            onChange={(e) =>
-              handleColorChange(colorPickerVisible, e.target.value)
-            }
-          />
-          <button onClick={() => setColorPickerVisible(null)}>Cancel</button>
+          <div
+            className="color-picker-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="color-picker-title">
+              Color for "{colorPickerVisible}"
+            </div>
+            <input
+              type="color"
+              defaultValue={traceColors[colorPickerVisible] || "#ffffff"}
+              onChange={(e) =>
+                handleColorChange(colorPickerVisible, e.target.value)
+              }
+            />
+            <button
+              className="sidebar-btn"
+              onClick={() => setColorPickerVisible(null)}
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       )}
     </div>

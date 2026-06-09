@@ -9,6 +9,7 @@ import {
   getStudyOffset,
   setFrameOffset,
 } from "./api/client";
+import "./App.css";
 
 function App() {
   const [frame, setFrame] = useState(1);
@@ -25,7 +26,6 @@ function App() {
 
   const timelineRef = useRef(null);
 
-  // Обратная синхронизация: при смене кадра перематываем аудио, если оно не играет
   const setFrameAndSync = useCallback((newFrame) => {
     const fn = typeof newFrame === "function" ? newFrame : () => newFrame;
     setFrame((prev) => {
@@ -75,7 +75,6 @@ function App() {
   }, [activeTrace, loadOffset]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     fullRefresh();
   }, []);
 
@@ -102,14 +101,14 @@ function App() {
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
+    <div className="app-root">
       <Header
         frame={frame}
         setFrame={setFrameAndSync}
         onFileChange={fullRefresh}
         onMethodChange={fullRefresh}
       />
-      <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
+      <div className="app-body">
         <Sidebar
           activeTrace={activeTrace}
           onSelectTrace={handleSelectTrace}
@@ -120,8 +119,8 @@ function App() {
           offset={offset}
           onOffsetApply={handleOffsetApply}
         />
-        <main style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-          <div style={{ flex: 1, display: "flex" }}>
+        <main className="app-main">
+          <div className="app-canvas-area">
             <FrameCanvas
               frameNumber={frame}
               activeTrace={activeTrace}
@@ -143,5 +142,3 @@ function App() {
 }
 
 export default App;
-
-// eslint-disable-next-line react-hooks/set-state-in-effect

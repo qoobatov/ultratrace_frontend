@@ -6,6 +6,7 @@ import {
   forwardRef,
 } from "react";
 import { getAudioUrl, getAudioInfo } from "../../api/client";
+import "./AudioPlayer.css";
 
 const AudioPlayer = forwardRef(
   (
@@ -21,6 +22,7 @@ const AudioPlayer = forwardRef(
   ) => {
     const audioRef = useRef(null);
     const segmentAudioRef = useRef(null);
+    const scrubberRef = useRef(null);
     const [playing, setPlaying] = useState(false);
     const [duration, setDuration] = useState(0);
     const [currentTime, setCurrentTime] = useState(0);
@@ -43,8 +45,9 @@ const AudioPlayer = forwardRef(
       };
     }, []);
 
+    const displayPlaying = isPlayingExternal ?? playing;
+
     const togglePlay = () => {
-      const displayPlaying = isPlayingExternal ?? playing;
       if (displayPlaying) {
         if (audioRef.current) audioRef.current.pause();
         if (segmentAudioRef.current) segmentAudioRef.current.pause();
@@ -90,6 +93,20 @@ const AudioPlayer = forwardRef(
       onPlayStateChange && onPlayStateChange(false);
     };
 
+    // Клик по скрабберу
+    const handleScrubberClick = (e) => {
+      if (!scrubberRef.current || !duration) return;
+      const rect = scrubberRef.current.getBoundingClientRect();
+      const ratio = Math.max(
+        0,
+        Math.min(1, (e.clientX - rect.left) / rect.width),
+      );
+      const time = ratio * duration;
+      if (audioRef.current) audioRef.current.currentTime = time;
+      setCurrentTime(time);
+      onTimeUpdate && onTimeUpdate(time);
+    };
+
     useImperativeHandle(ref, () => ({
       seek(time) {
         if (audioRef.current) {
@@ -117,21 +134,15 @@ const AudioPlayer = forwardRef(
 
       playSegmentUrl(url, offset = 0) {
         if (!segmentAudioRef.current) return;
-
-        // Останавливаем основное аудио
         if (audioRef.current) audioRef.current.pause();
 
         const seg = segmentAudioRef.current;
-
-        // Чистим предыдущие обработчики
         seg.ontimeupdate = null;
         seg.onended = null;
         seg.pause();
-
         seg.src = url;
         seg.currentTime = 0;
 
-        // Время сегмента идёт от 0, добавляем offset чтобы получить абсолютное время
         seg.ontimeupdate = () => {
           const absTime = offset + seg.currentTime;
           setCurrentTime(absTime);
@@ -150,17 +161,10 @@ const AudioPlayer = forwardRef(
       },
     }));
 
-    const displayPlaying = isPlayingExternal ?? playing;
+    const fillPct = duration ? (currentTime / duration) * 100 : 0;
 
     return (
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "8px",
-          padding: "4px",
-        }}
-      >
+      <div className="audio-player">
         <audio
           ref={audioRef}
           src={getAudioUrl()}
@@ -168,9 +172,35 @@ const AudioPlayer = forwardRef(
           onEnded={handleEnded}
           preload="auto"
         />
-        <button onClick={togglePlay}>{displayPlaying ? "⏸️" : "▶️"}</button>
-        <button onClick={stop}>⏹️</button>
-        <span>
+
+        <button
+          className={`player-btn ${displayPlaying ? "playing" : ""}`}
+          onClick={togglePlay}
+          title={displayPlaying ? "Pause" : "Play"}
+        >
+          {displayPlaying ? "⏸" : "▶"}
+        </button>
+
+        <button className="player-btn stop" onClick={stop} title="Stop">
+          ⏹
+        </button>
+
+        <div
+          className="player-scrubber"
+          ref={scrubberRef}
+          onClick={handleScrubberClick}
+        >
+          <div
+            className="player-scrubber-fill"
+            style={{ width: `${fillPct}%` }}
+          />
+          <div
+            className="player-scrubber-cursor"
+            style={{ left: `${fillPct}%` }}
+          />
+        </div>
+
+        <span className="player-time">
           {formatTime(currentTime)} / {formatTime(duration)}
         </span>
       </div>

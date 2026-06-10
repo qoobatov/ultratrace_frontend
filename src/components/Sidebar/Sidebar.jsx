@@ -66,10 +66,12 @@ const Sidebar = ({
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (spectrogramParams) setLocalSpecParams(spectrogramParams);
   }, [spectrogramParams]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLocalOffset(offset);
   }, [offset]);
 
@@ -91,6 +93,7 @@ const Sidebar = ({
   }, [activeTrace, onSelectTrace, initialized]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchTraces();
   }, []);
 

@@ -11,6 +11,7 @@ import TimelineBar from "./TimelineBar";
 import TextGridTiers from "./TextGridTiers";
 import SpectrogramView from "./SpectrogramView";
 import { getAudioSegmentUrl } from "../../api/client";
+import "./Timeline.css";
 
 const TG_ZOOM_FACTOR = 1.5;
 
@@ -38,7 +39,7 @@ const Timeline = forwardRef(
     const [selectedInterval, setSelectedInterval] = useState(null);
 
     const audioRef = useRef(null);
-    const offsetPanelRef = useRef(null);
+    const overviewRef = useRef(null);
     const currentFrameRef = useRef(frame);
     const playingSelectionRef = useRef(false);
     const stopCheckRef = useRef(null);
@@ -129,7 +130,6 @@ const Timeline = forwardRef(
         stopCheckRef.current = null;
       }
       const url = getAudioSegmentUrl(interval.start, interval.end);
-      // Передаём offset чтобы таймер показывал абсолютное время
       audioRef.current.playSegmentUrl(url, interval.start);
       playingSelectionRef.current = true;
     }, []);
@@ -153,13 +153,8 @@ const Timeline = forwardRef(
     useEffect(() => {
       const onKeyDown = (e) => {
         const ctrl = e.ctrlKey || e.metaKey;
-
-        if (ctrl && ["i", "o", "a", "b"].includes(e.key)) {
-          e.preventDefault();
-        }
-        if (e.key === " " && selectedInterval) {
-          e.preventDefault();
-        }
+        if (ctrl && ["i", "o", "a", "b"].includes(e.key)) e.preventDefault();
+        if (e.key === " " && selectedInterval) e.preventDefault();
 
         if (
           e.target.tagName === "INPUT" ||
@@ -172,11 +167,7 @@ const Timeline = forwardRef(
         if (ctrl && e.key === "o") zoomOut();
         if (ctrl && e.key === "a") zoomAll();
         if (ctrl && e.key === "b") zoomToSelection();
-
-        if (e.key === " ") {
-          if (selectedInterval) handlePlaySelection();
-        }
-
+        if (e.key === " " && selectedInterval) handlePlaySelection();
         if (e.shiftKey && e.key === "ArrowLeft") {
           e.preventDefault();
           panLeft();
@@ -186,7 +177,6 @@ const Timeline = forwardRef(
           panRight();
         }
       };
-
       window.addEventListener("keydown", onKeyDown);
       return () => window.removeEventListener("keydown", onKeyDown);
     }, [
@@ -263,53 +253,26 @@ const Timeline = forwardRef(
       [frameTimes, isPlaying, zoomIn, zoomOut, zoomAll, zoomToSelection],
     );
 
-    const updateTimeFromMouse = useCallback(
+    // ── Overview scrubber (mini map) ──────────────────────────────────────
+    const handleOverviewClick = useCallback(
       (e) => {
-        const panel = offsetPanelRef.current;
-        if (!panel || !duration) return;
-        const rect = panel.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const ratio = Math.max(0, Math.min(1, x / rect.width));
-        const newTime = effStart + ratio * (effEnd - effStart);
-        setCurrentTime(newTime);
-        const calcFrame = getFrameAtTime(newTime, frameTimes);
-        if (calcFrame !== currentFrameRef.current) {
-          currentFrameRef.current = calcFrame;
-          setFrame(calcFrame);
-        }
+        const el = overviewRef.current;
+        if (!el || !duration) return;
+        const rect = el.getBoundingClientRect();
+        const ratio = Math.max(
+          0,
+          Math.min(1, (e.clientX - rect.left) / rect.width),
+        );
+        const time = ratio * duration;
+        handleSeek(time);
+        // Центрируем окно на кликнутом месте
+        const viewLen = effEnd - effStart;
+        const [s, e2] = clampView(time - viewLen / 2, time + viewLen / 2);
+        setViewStart(s);
+        setViewEnd(e2);
       },
-      [duration, frameTimes, setFrame, effStart, effEnd],
+      [duration, effStart, effEnd, clampView, handleSeek],
     );
-
-    const handleMouseDownOnOffset = (e) => {
-      if (e.target.tagName === "BUTTON" || e.target.tagName === "INPUT") return;
-      e.preventDefault();
-      setIsDragging(true);
-      updateTimeFromMouse(e);
-    };
-
-    const handleMouseMove = useCallback(
-      (e) => {
-        if (isDragging) updateTimeFromMouse(e);
-      },
-      [isDragging, updateTimeFromMouse],
-    );
-
-    const handleMouseUp = useCallback(() => {
-      if (isDragging && audioRef.current) audioRef.current.seek(currentTime);
-      setIsDragging(false);
-    }, [isDragging, currentTime]);
-
-    useEffect(() => {
-      if (isDragging) {
-        window.addEventListener("mousemove", handleMouseMove);
-        window.addEventListener("mouseup", handleMouseUp);
-      }
-      return () => {
-        window.removeEventListener("mousemove", handleMouseMove);
-        window.removeEventListener("mouseup", handleMouseUp);
-      };
-    }, [isDragging, handleMouseMove, handleMouseUp]);
 
     const handlePlayStateChange = useCallback((playing) => {
       setIsPlaying(playing);
@@ -320,59 +283,70 @@ const Timeline = forwardRef(
       effEnd > effStart ? (currentTime - effStart) / (effEnd - effStart) : 0;
     const cursorVisible = cursorRatio >= 0 && cursorRatio <= 1;
 
+    // Toolbar buttons config
+    const toolbarButtons = [
+      {
+        label: "−",
+        title: "Zoom In (Ctrl+I)",
+        action: zoomIn,
+        cls: "tl-btn tl-btn-icon",
+      },
+      {
+        label: "+",
+        title: "Zoom Out (Ctrl+O)",
+        action: zoomOut,
+        cls: "tl-btn tl-btn-icon",
+      },
+      {
+        label: "⊡",
+        title: "Zoom All (Ctrl+A)",
+        action: zoomAll,
+        cls: "tl-btn tl-btn-icon",
+      },
+      {
+        label: "⊞",
+        title: "Zoom Select (Ctrl+B)",
+        action: zoomToSelection,
+        cls: "tl-btn tl-btn-icon",
+      },
+      {
+        label: "‹",
+        title: "Pan Left (Shift+←)",
+        action: panLeft,
+        cls: "tl-btn tl-btn-icon",
+      },
+      {
+        label: "›",
+        title: "Pan Right (Shift+→)",
+        action: panRight,
+        cls: "tl-btn tl-btn-icon",
+      },
+    ];
+
     return (
-      <div
-        style={{
-          background: "#fafafa",
-          borderTop: "2px solid #ccc",
-          maxHeight: "40vh",
-          overflowY: "auto",
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            gap: "4px",
-            padding: "4px 8px 0",
-            flexWrap: "wrap",
-          }}
-        >
-          {[
-            { label: "Zoom In (Ctrl+I)", action: zoomIn },
-            { label: "Zoom Out (Ctrl+O)", action: zoomOut },
-            { label: "Zoom All (Ctrl+A)", action: zoomAll },
-            { label: "Zoom Select (Ctrl+B)", action: zoomToSelection },
-            { label: "◀ (Shift+←)", action: panLeft },
-            { label: "▶ (Shift+→)", action: panRight },
-            {
-              label: selectedInterval ? "▶ Selection (Space)" : "▶ Selection",
-              action: handlePlaySelection,
-              disabled: !selectedInterval,
-            },
-          ].map(({ label, action, disabled }) => (
-            <button
-              key={label}
-              onClick={action}
-              disabled={disabled}
-              title={label}
-              style={{
-                fontSize: "10px",
-                padding: "1px 6px",
-                cursor: disabled ? "default" : "pointer",
-                background: "#e8e8e8",
-                border: "1px solid #bbb",
-                borderRadius: "3px",
-                opacity: disabled ? 0.5 : 1,
-              }}
-            >
+      <div className="timeline">
+        {/* ── Toolbar ── */}
+        <div className="timeline-toolbar">
+          {toolbarButtons.map(({ label, title, action, cls }) => (
+            <button key={title} className={cls} onClick={action} title={title}>
               {label}
             </button>
           ))}
+
+          <div className="tl-divider" />
+
+          <button
+            className={`tl-btn${selectedInterval ? " active" : ""}`}
+            onClick={handlePlaySelection}
+            disabled={!selectedInterval}
+            title="Play selection (Space)"
+          >
+            ▶ Selection
+          </button>
         </div>
 
-        <div style={{ padding: "0 8px 8px 8px" }}>
+        {/* ── Spectrogram ── */}
+        <div className="timeline-spectrogram">
           <SpectrogramView
             duration={duration}
             currentTime={currentTime}
@@ -381,27 +355,33 @@ const Timeline = forwardRef(
             viewEnd={effEnd}
           />
         </div>
-        <div style={{ padding: "8px", paddingBottom: 0 }}>
-          <AudioPlayer
-            ref={audioRef}
-            onTimeUpdate={handleTimeUpdate}
-            onDurationLoaded={setDuration}
-            onPlayStateChange={handlePlayStateChange}
-            onStop={handleStop}
-            onPlay={() => {
-              if (selectedInterval) playInterval(selectedInterval);
-            }}
-            isPlayingExternal={isPlaying}
-          />
-          <TimelineBar
-            duration={duration}
-            currentTime={currentTime}
-            onSeek={handleSeek}
-            frameTimes={frameTimes}
-            onFrameChange={setFrame}
-            viewStart={effStart}
-            viewEnd={effEnd}
-          />
+
+        {/* ── Player + scrubber ── */}
+        <AudioPlayer
+          ref={audioRef}
+          onTimeUpdate={handleTimeUpdate}
+          onDurationLoaded={setDuration}
+          onPlayStateChange={handlePlayStateChange}
+          onStop={handleStop}
+          onPlay={() => {
+            if (selectedInterval) playInterval(selectedInterval);
+          }}
+          isPlayingExternal={isPlaying}
+        />
+
+        {/* ── TimelineBar ── */}
+        {/* <TimelineBar
+          duration={duration}
+          currentTime={currentTime}
+          onSeek={handleSeek}
+          frameTimes={frameTimes}
+          onFrameChange={setFrame}
+          viewStart={effStart}
+          viewEnd={effEnd}
+        /> */}
+
+        {/* ── TextGrid tiers ── */}
+        <div className="timeline-tiers">
           <TextGridTiers
             currentTime={currentTime}
             duration={duration}
@@ -410,48 +390,29 @@ const Timeline = forwardRef(
             viewEnd={effEnd}
             selectedInterval={selectedInterval}
           />
+        </div>
 
-          <div
-            ref={offsetPanelRef}
-            onMouseDown={handleMouseDownOnOffset}
-            style={{
-              marginTop: "8px",
-              marginBottom: "4px",
-              position: "relative",
-              cursor: isDragging ? "grabbing" : "ew-resize",
-              height: "14px",
-              background: "#e0e0e0",
-              borderRadius: "2px",
-            }}
-          >
-            {duration > 0 && (
-              <div
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  bottom: 0,
-                  left: `${(effStart / duration) * 100}%`,
-                  right: `${((duration - effEnd) / duration) * 100}%`,
-                  background: "rgba(100,150,255,0.18)",
-                  borderRadius: "2px",
-                  pointerEvents: "none",
-                }}
-              />
-            )}
-            {duration > 0 && cursorVisible && (
-              <div
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  bottom: 0,
-                  left: `${cursorRatio * 100}%`,
-                  width: "1px",
-                  background: "red",
-                  pointerEvents: "none",
-                }}
-              />
-            )}
-          </div>
+        {/* ── Overview minimap ── */}
+        <div
+          className="timeline-overview"
+          ref={overviewRef}
+          onClick={handleOverviewClick}
+        >
+          {duration > 0 && (
+            <div
+              className="timeline-overview-window"
+              style={{
+                left: `${(effStart / duration) * 100}%`,
+                right: `${((duration - effEnd) / duration) * 100}%`,
+              }}
+            />
+          )}
+          {duration > 0 && (
+            <div
+              className="timeline-overview-cursor"
+              style={{ left: `${(currentTime / duration) * 100}%` }}
+            />
+          )}
         </div>
       </div>
     );

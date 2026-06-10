@@ -1,0 +1,29 @@
+.timeline-bar {
+  position: relative;
+  height: 6px;
+  background: #11111b;
+  cursor: pointer;
+  margin: 0 8px;
+  border-radius: 2px;
+}
+
+.timeline-bar-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  background: #45475a;
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.timeline-bar-cursor {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  background: #f38ba8;
+  border-radius: 1px;
+  pointer-events: none;
+  transform: translateX(-50%);
+}

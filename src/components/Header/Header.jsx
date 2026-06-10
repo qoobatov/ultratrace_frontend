@@ -5,6 +5,7 @@ import {
   getAvailableMethods,
   changeMethod,
 } from "../../api/client";
+import "./Header.css";
 
 const Header = ({ frame, setFrame, onFileChange, onMethodChange }) => {
   const [files, setFiles] = useState([]);
@@ -15,9 +16,7 @@ const Header = ({ frame, setFrame, onFileChange, onMethodChange }) => {
   useEffect(() => {
     getStudyFiles().then((data) => {
       setFiles(data);
-      if (data.length > 0) {
-        setSelectedFile(data[0].index);
-      }
+      if (data.length > 0) setSelectedFile(data[0].index);
     });
     getAvailableMethods().then(setMethods);
   }, []);
@@ -40,20 +39,17 @@ const Header = ({ frame, setFrame, onFileChange, onMethodChange }) => {
   };
 
   return (
-    <header
-      style={{
-        padding: "1rem",
-        background: "#f0f0f0",
-        display: "flex",
-        alignItems: "center",
-        gap: "1rem",
-        flexWrap: "wrap",
-      }}
-    >
-      <h1 style={{ margin: 0 }}>UltraTrace Web</h1>
+    <header className="header">
+      <span className="header-logo">UltraTrace</span>
 
-      <div style={{ display: "flex", gap: "0.5rem" }}>
-        <select value={selectedFile} onChange={handleFileChange}>
+      <div className="header-divider" />
+
+      <div className="header-group">
+        <select
+          className="header-select"
+          value={selectedFile}
+          onChange={handleFileChange}
+        >
           {files.map((f) => (
             <option key={f.index} value={f.index}>
               {f.name}
@@ -61,7 +57,11 @@ const Header = ({ frame, setFrame, onFileChange, onMethodChange }) => {
           ))}
         </select>
 
-        <select value={selectedMethod} onChange={handleMethodChange}>
+        <select
+          className="header-select"
+          value={selectedMethod}
+          onChange={handleMethodChange}
+        >
           {methods.map((m) => (
             <option key={m} value={m}>
               {m}
@@ -69,23 +69,42 @@ const Header = ({ frame, setFrame, onFileChange, onMethodChange }) => {
           ))}
         </select>
 
-        <button onClick={() => onFileChange && onFileChange()}>
-          Load frames
+        <button
+          className="header-btn"
+          onClick={() => onFileChange && onFileChange()}
+          title="Reload frames"
+        >
+          ↺ Reload
         </button>
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-        <button onClick={() => setFrame((f) => Math.max(1, f - 1))}>
-          Prev
+      <div className="header-divider" />
+
+      <div className="header-group">
+        <button
+          className="header-btn icon"
+          onClick={() => setFrame((f) => Math.max(1, f - 1))}
+          title="Previous frame"
+        >
+          ‹
         </button>
         <input
+          className="header-frame-input"
           type="number"
           value={frame}
           onChange={(e) => setFrame(Number(e.target.value))}
-          style={{ width: "60px", margin: "0 8px" }}
+          title="Frame number"
         />
-        <button onClick={() => setFrame((f) => f + 1)}>Next</button>
+        <button
+          className="header-btn icon"
+          onClick={() => setFrame((f) => f + 1)}
+          title="Next frame"
+        >
+          ›
+        </button>
       </div>
+
+      <div className="header-spacer" />
     </header>
   );
 };

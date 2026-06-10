@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { getTextGridIntervals } from "../../api/client";
+import "./TextGridTiers.css";
 
 const TextGridTiers = ({
   currentTime,
@@ -22,80 +23,52 @@ const TextGridTiers = ({
     });
   }, []);
 
-  if (!Object.keys(tiers).length) return <div>No TextGrid data</div>;
+  if (!Object.keys(tiers).length) return null;
 
   const effStart = viewStart ?? 0;
   const effEnd = viewEnd ?? duration;
   const viewDuration = effEnd - effStart;
 
   return (
-    <div style={{ fontSize: "12px", marginTop: "8px" }}>
+    <div className="tiers-container">
       {Object.entries(tiers).map(([tierName, intervals]) => (
-        <div key={tierName} style={{ marginBottom: "4px" }}>
-          <div
-            style={{
-              display: "flex",
-              height: "20px",
-              background: "#eee",
-              position: "relative",
-            }}
-          >
-            {intervals
-              .filter((iv) => iv.end > effStart && iv.start < effEnd)
-              .map((interval, idx) => {
-                const clampedStart = Math.max(interval.start, effStart);
-                const clampedEnd = Math.min(interval.end, effEnd);
+        <div key={tierName} className="tier-row">
+          {intervals
+            .filter((iv) => iv.end > effStart && iv.start < effEnd)
+            .map((interval, idx) => {
+              const clampedStart = Math.max(interval.start, effStart);
+              const clampedEnd = Math.min(interval.end, effEnd);
 
-                const left = viewDuration
-                  ? ((clampedStart - effStart) / viewDuration) * 100
-                  : 0;
-                const width = viewDuration
-                  ? ((clampedEnd - clampedStart) / viewDuration) * 100
-                  : 0;
+              const left = viewDuration
+                ? ((clampedStart - effStart) / viewDuration) * 100
+                : 0;
+              const width = viewDuration
+                ? ((clampedEnd - clampedStart) / viewDuration) * 100
+                : 0;
 
-                const isSelected =
-                  selectedInterval &&
-                  selectedInterval.start === interval.start &&
-                  selectedInterval.end === interval.end &&
-                  selectedInterval.tier === interval.tier;
+              const isSelected =
+                selectedInterval &&
+                selectedInterval.start === interval.start &&
+                selectedInterval.end === interval.end &&
+                selectedInterval.tier === interval.tier;
 
-                const isCurrent =
-                  !isSelected &&
-                  currentTime >= interval.start &&
-                  currentTime < interval.end;
+              const isCurrent =
+                !isSelected &&
+                currentTime >= interval.start &&
+                currentTime < interval.end;
 
-                let background = "#ddd";
-                if (isSelected) background = "#88aaff";
-                else if (isCurrent) background = "#cce";
-
-                return (
-                  <div
-                    key={idx}
-                    onClick={() =>
-                      onSelectInterval && onSelectInterval(interval)
-                    }
-                    style={{
-                      position: "absolute",
-                      left: `${left}%`,
-                      width: `${width}%`,
-                      height: "100%",
-                      background,
-                      border: isSelected ? "1px solid #336" : "1px solid #999",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                      cursor: "pointer",
-                      padding: "0 2px",
-                      boxSizing: "border-box",
-                      fontWeight: isSelected ? "bold" : "normal",
-                    }}
-                    title={interval.text}
-                  >
-                    {interval.text}
-                  </div>
-                );
-              })}
-          </div>
+              return (
+                <div
+                  key={idx}
+                  className={`tier-interval${isSelected ? " is-selected" : isCurrent ? " is-current" : ""}`}
+                  style={{ left: `${left}%`, width: `${width}%` }}
+                  onClick={() => onSelectInterval && onSelectInterval(interval)}
+                  title={interval.text}
+                >
+                  {interval.text}
+                </div>
+              );
+            })}
         </div>
       ))}
     </div>

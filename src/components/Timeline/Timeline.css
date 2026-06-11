@@ -4,6 +4,7 @@
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
+  padding: 4px var(--tl-pad);
 }
 
 /* ── Toolbar ── */
@@ -15,6 +16,7 @@
   background: #1e1e2e;
   border-bottom: 1px solid #313244;
   flex-wrap: wrap;
+  padding: 4px var(--tl-pad);
 }
 
 .tl-btn {
@@ -61,6 +63,7 @@
 .timeline-spectrogram {
   padding: 0 8px;
   position: relative;
+  padding: 4px var(--tl-pad) 0;
 }
 
 /* ── Player row ── */
@@ -71,6 +74,7 @@
   padding: 4px 8px;
   background: #1e1e2e;
   border-top: 1px solid #313244;
+  padding: 4px var(--tl-pad);
 }
 
 .player-btn {
@@ -134,6 +138,7 @@
 /* ── Tiers ── */
 .timeline-tiers {
   padding: 0 8px 4px;
+  padding: 0 var(--tl-pad) 4px;
 }
 
 .tier-row {
@@ -185,11 +190,12 @@
 /* ── Mini overview scrubber ── */
 .timeline-overview {
   position: relative;
-  height: 10px;
+  height: 30px;
   background: #11111b;
   margin: 2px 8px 4px;
   border-radius: 2px;
   cursor: ew-resize;
+  margin: 2px var(--tl-pad) 4px;
 }
 
 .timeline-overview-window {
@@ -208,5 +214,13 @@
   bottom: 0;
   width: 1px;
   background: #f38ba8;
+  pointer-events: none;
+}
+.timeline-overview-frame {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(137, 180, 250, 0.15);
   pointer-events: none;
 }

@@ -11,7 +11,7 @@
   border-right: 1px solid #313244;
 }
 
-.sidebar-scroll {
+/* .sidebar-scroll {
   flex: 1;
   overflow-y: auto;
   padding: 8px;
@@ -29,6 +29,63 @@
 .sidebar-scroll::-webkit-scrollbar-thumb {
   background: #45475a;
   border-radius: 2px;
+} */
+
+.sidebar {
+  width: 180px;
+  min-width: 180px;
+  background: #1e1e2e;
+  color: #cdd6f4;
+  display: flex;
+  flex-direction: column; /* зоны идут сверху вниз */
+  height: 100%;
+  overflow-y: auto;
+  font-size: 12px;
+  border-right: 1px solid #313244;
+}
+
+.sidebar::-webkit-scrollbar {
+  width: 4px;
+}
+.sidebar::-webkit-scrollbar-track {
+  background: #1e1e2e;
+}
+.sidebar::-webkit-scrollbar-thumb {
+  background: #45475a;
+  border-radius: 2px;
+}
+
+/* ── Зоны ── */
+.sidebar-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  flex-shrink: 0; /* не сжимаются */
+}
+
+/* Landmarks растягивается чтобы занять место напротив FrameCanvas */
+.sidebar-zone.zone-landmarks {
+  background: #1e1e2e;
+  flex: 1;
+  min-height: 120px;
+  gap: 10px; /* больше воздуха между элементами */
+  padding: 12px; /* больше отступов по краям */
+}
+
+.sidebar-zone.zone-spectrogram {
+  background: #1a1a2a;
+  border-top: 2px solid #11111b;
+}
+
+.sidebar-zone.zone-annotations {
+  background: #1c1c2e;
+  border-top: 2px solid #11111b;
+}
+
+.sidebar-zone.zone-offset {
+  background: #181825;
+  border-top: 2px solid #11111b;
 }
 
 /* ── Section ── */
@@ -55,14 +112,14 @@
   margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 
 .trace-item {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 6px;
+  padding: 6px 8px;
   border-radius: 4px;
   cursor: pointer;
   transition: background 0.15s;
@@ -171,9 +228,9 @@
 }
 
 .sidebar-btn.danger:hover:not(:disabled) {
-  background: #f38ba8;
+  background: #89b4fa;
   color: #1e1e2e;
-  border-color: #f38ba8;
+  border-color: #89b4fa;
 }
 
 .sidebar-btn-row {

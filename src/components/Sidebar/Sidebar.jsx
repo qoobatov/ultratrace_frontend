@@ -173,8 +173,7 @@ const Sidebar = ({
   };
 
   const handleSpecChange = (field, value) => {
-    const newParams = { ...localSpecParams, [field]: value };
-    setLocalSpecParams(newParams);
+    setLocalSpecParams((p) => ({ ...p, [field]: value }));
   };
 
   const handleSpecReset = () => {
@@ -190,204 +189,195 @@ const Sidebar = ({
 
   return (
     <div className="sidebar">
-      <div className="sidebar-scroll">
-        {/* ── Landmarks ── */}
-        <div className="sidebar-section">
-          <div className="sidebar-section-title">Landmarks</div>
-          <ul className="trace-list">
-            {traces.map((name) => (
-              <li
-                key={name}
-                className={`trace-item ${name === activeTrace ? "active" : ""}`}
-              >
-                <span
-                  className="trace-dot"
-                  style={{ background: traceColors[name] || "#6c7086" }}
-                />
-                {renameTarget === name ? (
-                  <input
-                    className="trace-rename-input"
-                    value={renameValue}
-                    onChange={(e) => setRenameValue(e.target.value)}
-                    onBlur={() => setRenameTarget(null)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") handleRename(name);
-                      if (e.key === "Escape") setRenameTarget(null);
-                    }}
-                    autoFocus
-                  />
-                ) : (
-                  <span
-                    className="trace-name"
-                    onClick={() => onSelectTrace(name)}
-                  >
-                    {name}
-                  </span>
-                )}
-                <button
-                  className={`icon-btn ${name === defaultTraceName ? "active-star" : ""}`}
-                  onClick={() => handleSetDefault(name)}
-                  title="Set as default"
-                >
-                  ★
-                </button>
-                <button
-                  className="icon-btn"
-                  onClick={() => {
-                    setRenameTarget(name);
-                    setRenameValue(name);
+      {/* ── Zone 1: Landmarks — flex:1 растягивается напротив FrameCanvas ── */}
+      <div className="sidebar-zone zone-landmarks">
+        <div className="sidebar-section-title">Landmarks</div>
+        <ul className="trace-list">
+          {traces.map((name) => (
+            <li
+              key={name}
+              className={`trace-item ${name === activeTrace ? "active" : ""}`}
+            >
+              <span
+                className="trace-dot"
+                style={{ background: traceColors[name] || "#6c7086" }}
+              />
+              {renameTarget === name ? (
+                <input
+                  className="trace-rename-input"
+                  value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onBlur={() => setRenameTarget(null)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleRename(name);
+                    if (e.key === "Escape") setRenameTarget(null);
                   }}
-                  title="Rename"
+                  autoFocus
+                />
+              ) : (
+                <span
+                  className="trace-name"
+                  onClick={() => onSelectTrace(name)}
                 >
-                  ✎
-                </button>
-                <button
-                  className="icon-btn"
-                  onClick={() => setColorPickerVisible(name)}
-                  title="Change color"
-                >
-                  ◉
-                </button>
-                <button
-                  className="icon-btn"
-                  onClick={() => handleDelete(name)}
-                  title="Delete"
-                >
-                  ✕
-                </button>
-              </li>
-            ))}
-          </ul>
-
-          <div className="add-trace-row">
-            <input
-              className="sidebar-input"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleCreate()}
-              placeholder="New trace name"
-            />
-            <button className="sidebar-btn" onClick={handleCreate}>
-              Add
-            </button>
-          </div>
-
-          <div className="sidebar-btn-row">
-            <button
-              className="sidebar-btn danger"
-              onClick={handleClearFrame}
-              disabled={!activeTrace}
-              title="Clear current frame"
-            >
-              Clear Frame
-            </button>
-            <button
-              className="sidebar-btn danger"
-              disabled={!activeTrace}
-              onClick={() => {
-                if (!activeTrace) return;
-                if (!window.confirm(`Remove all points for "${activeTrace}"?`))
-                  return;
-                clearAllPoints(activeTrace).then(() => onTracesUpdate?.());
-              }}
-              title="Clear all frames"
-            >
-              Clear All
-            </button>
-          </div>
-        </div>
-
-        {/* ── Annotations ── */}
-        <div className="sidebar-section">
-          <div className="sidebar-section-title">Annotations</div>
-          {displayTiers.map((tierName) => (
-            <div key={tierName} className="annotation-row">
-              <span>{tierName}</span>
-              <span className="annotation-badge">
-                {tierStats[tierName] || 0}/{totalFrames}
-              </span>
-            </div>
+                  {name}
+                </span>
+              )}
+              <button
+                className={`icon-btn ${name === defaultTraceName ? "active-star" : ""}`}
+                onClick={() => handleSetDefault(name)}
+                title="Set as default"
+              >
+                ★
+              </button>
+              <button
+                className="icon-btn"
+                onClick={() => {
+                  setRenameTarget(name);
+                  setRenameValue(name);
+                }}
+                title="Rename"
+              >
+                ✎
+              </button>
+              <button
+                className="icon-btn"
+                onClick={() => setColorPickerVisible(name)}
+                title="Change color"
+              >
+                ◉
+              </button>
+              <button
+                className="icon-btn"
+                onClick={() => handleDelete(name)}
+                title="Delete"
+              >
+                ✕
+              </button>
+            </li>
           ))}
-        </div>
-
-        {/* ── Spectrogram ── */}
-        <div className="sidebar-section">
-          <div className="sidebar-section-title">Spectrogram</div>
-          <div className="param-row">
-            <span className="param-label">Freq Max</span>
-            <input
-              className="param-input"
-              type="number"
-              value={localSpecParams.freq_max}
-              onChange={(e) =>
-                handleSpecChange("freq_max", parseFloat(e.target.value) || 0)
-              }
-              step="100"
-              min="0"
-            />
-          </div>
-          <div className="param-row">
-            <span className="param-label">Window</span>
-            <input
-              className="param-input"
-              type="number"
-              value={localSpecParams.window_length}
-              onChange={(e) =>
-                handleSpecChange(
-                  "window_length",
-                  parseFloat(e.target.value) || 0.001,
-                )
-              }
-              step="0.001"
-              min="0.001"
-            />
-          </div>
-          <div className="param-row">
-            <span className="param-label">Dyn Range</span>
-            <input
-              className="param-input"
-              type="number"
-              value={localSpecParams.dynamic_range}
-              onChange={(e) =>
-                handleSpecChange(
-                  "dynamic_range",
-                  parseFloat(e.target.value) || 0,
-                )
-              }
-              step="10"
-              min="0"
-            />
-          </div>
-          <div className="sidebar-btn-row">
-            <button className="sidebar-btn" onClick={handleSpecApply}>
-              Apply
-            </button>
-            <button className="sidebar-btn" onClick={handleSpecReset}>
-              Reset
-            </button>
-          </div>
-        </div>
-
-        {/* ── Offset ── */}
-        <div className="sidebar-section">
-          <div className="sidebar-section-title">Offset</div>
-          <div className="offset-row">
-            <input
-              className="sidebar-input"
-              type="number"
-              value={localOffset}
-              onChange={(e) => setLocalOffset(Number(e.target.value))}
-              step="1"
-            />
-            <span className="offset-unit">ms</span>
-          </div>
-          <button
-            className="sidebar-btn"
-            onClick={() => onOffsetApply(localOffset)}
-          >
-            Apply Offset
+        </ul>
+        <div className="add-trace-row">
+          <input
+            className="sidebar-input"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleCreate()}
+            placeholder="New trace name"
+          />
+          <button className="sidebar-btn" onClick={handleCreate}>
+            Add
           </button>
         </div>
+        <div className="sidebar-btn-row">
+          <button
+            className="sidebar-btn danger"
+            onClick={handleClearFrame}
+            disabled={!activeTrace}
+          >
+            Clear Frame
+          </button>
+          <button
+            className="sidebar-btn danger"
+            disabled={!activeTrace}
+            onClick={() => {
+              if (!activeTrace) return;
+              if (!window.confirm(`Remove all points for "${activeTrace}"?`))
+                return;
+              clearAllPoints(activeTrace).then(() => onTracesUpdate?.());
+            }}
+          >
+            Clear All
+          </button>
+        </div>
+      </div>
+
+      {/* ── Zone 2: Spectrogram params — напротив спектрограммы ── */}
+      <div className="sidebar-zone zone-spectrogram">
+        <div className="sidebar-section-title">Spectrogram</div>
+        <div className="param-row">
+          <span className="param-label">Freq Max</span>
+          <input
+            className="param-input"
+            type="number"
+            value={localSpecParams.freq_max}
+            onChange={(e) =>
+              handleSpecChange("freq_max", parseFloat(e.target.value) || 0)
+            }
+            step="100"
+            min="0"
+          />
+        </div>
+        <div className="param-row">
+          <span className="param-label">Window</span>
+          <input
+            className="param-input"
+            type="number"
+            value={localSpecParams.window_length}
+            onChange={(e) =>
+              handleSpecChange(
+                "window_length",
+                parseFloat(e.target.value) || 0.001,
+              )
+            }
+            step="0.001"
+            min="0.001"
+          />
+        </div>
+        <div className="param-row">
+          <span className="param-label">Dyn Range</span>
+          <input
+            className="param-input"
+            type="number"
+            value={localSpecParams.dynamic_range}
+            onChange={(e) =>
+              handleSpecChange("dynamic_range", parseFloat(e.target.value) || 0)
+            }
+            step="10"
+            min="0"
+          />
+        </div>
+        <div className="sidebar-btn-row">
+          <button className="sidebar-btn" onClick={handleSpecApply}>
+            Apply
+          </button>
+          <button className="sidebar-btn" onClick={handleSpecReset}>
+            Reset
+          </button>
+        </div>
+      </div>
+
+      {/* ── Zone 3: Annotations — напротив TextGrid тиров ── */}
+      <div className="sidebar-zone zone-annotations">
+        <div className="sidebar-section-title">Annotations</div>
+        {displayTiers.map((tierName) => (
+          <div key={tierName} className="annotation-row">
+            <span className="annotation-label">{tierName}</span>
+            <span className="annotation-badge">
+              {tierStats[tierName] || 0}/{totalFrames}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Zone 4: Offset — напротив overview ── */}
+      <div className="sidebar-zone zone-offset">
+        <div className="sidebar-section-title">Offset</div>
+        <div className="offset-row">
+          <input
+            className="sidebar-input"
+            type="number"
+            value={localOffset}
+            onChange={(e) => setLocalOffset(Number(e.target.value))}
+            step="1"
+          />
+          <span className="offset-unit">ms</span>
+        </div>
+        <button
+          className="sidebar-btn"
+          onClick={() => onOffsetApply(localOffset)}
+        >
+          Apply
+        </button>
       </div>
 
       {/* ── Color picker modal ── */}

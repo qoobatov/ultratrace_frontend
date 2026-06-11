@@ -17,6 +17,8 @@ const AudioPlayer = forwardRef(
       onStop,
       onPlay,
       isPlayingExternal,
+      viewStart,
+      viewEnd,
     },
     ref,
   ) => {
@@ -46,6 +48,16 @@ const AudioPlayer = forwardRef(
     }, []);
 
     const displayPlaying = isPlayingExternal ?? playing;
+
+    // Позиция курсора относительно окна просмотра
+    const effStart = viewStart ?? 0;
+    const effEnd = viewEnd ?? duration;
+    const viewDuration = effEnd - effStart;
+
+    const cursorRatio =
+      viewDuration > 0 ? (currentTime - effStart) / viewDuration : 0;
+    const cursorVisible = cursorRatio >= 0 && cursorRatio <= 1;
+    const fillPct = cursorVisible ? cursorRatio * 100 : 0;
 
     const togglePlay = () => {
       if (displayPlaying) {
@@ -93,15 +105,14 @@ const AudioPlayer = forwardRef(
       onPlayStateChange && onPlayStateChange(false);
     };
 
-    // Клик по скрабберу
     const handleScrubberClick = (e) => {
-      if (!scrubberRef.current || !duration) return;
+      if (!scrubberRef.current || !viewDuration) return;
       const rect = scrubberRef.current.getBoundingClientRect();
       const ratio = Math.max(
         0,
         Math.min(1, (e.clientX - rect.left) / rect.width),
       );
-      const time = ratio * duration;
+      const time = effStart + ratio * viewDuration;
       if (audioRef.current) audioRef.current.currentTime = time;
       setCurrentTime(time);
       onTimeUpdate && onTimeUpdate(time);
@@ -161,8 +172,6 @@ const AudioPlayer = forwardRef(
       },
     }));
 
-    const fillPct = duration ? (currentTime / duration) * 100 : 0;
-
     return (
       <div className="audio-player">
         <audio
@@ -190,14 +199,18 @@ const AudioPlayer = forwardRef(
           ref={scrubberRef}
           onClick={handleScrubberClick}
         >
-          <div
-            className="player-scrubber-fill"
-            style={{ width: `${fillPct}%` }}
-          />
-          <div
-            className="player-scrubber-cursor"
-            style={{ left: `${fillPct}%` }}
-          />
+          {cursorVisible && (
+            <>
+              <div
+                className="player-scrubber-fill"
+                style={{ width: `${fillPct}%` }}
+              />
+              <div
+                className="player-scrubber-cursor"
+                style={{ left: `${fillPct}%` }}
+              />
+            </>
+          )}
         </div>
 
         <span className="player-time">

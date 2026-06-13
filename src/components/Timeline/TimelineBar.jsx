@@ -46,11 +46,11 @@ const TimelineBar = ({
       onClick={handleClick}
       style={{
         width: "100%",
-        height: "20px",
+        height: "10px",
         background: "#ccc",
         position: "relative",
         cursor: "pointer",
-        margin: "4px 0",
+        margin: "2px 0",
       }}
     >
       {/* Прогресс-бар до курсора */}
@@ -59,7 +59,7 @@ const TimelineBar = ({
           style={{
             width: `${cursorRatio * 100}%`,
             height: "100%",
-            background: "#0af",
+            background: "rgb(243, 176, 164)",
           }}
         />
       )}

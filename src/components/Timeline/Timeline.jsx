@@ -28,6 +28,12 @@ const getFrameAtTime = (time, frameTimes) => {
   return Math.min(start + 1, frameTimes.length);
 };
 
+const formatTime = (sec) => {
+  const m = Math.floor(sec / 60);
+  const s = (sec % 60).toFixed(2).padStart(5, "0");
+  return `${m}:${s}`;
+};
+
 const Timeline = forwardRef(
   ({ frame, setFrame, frameTimes, spectrogramParams }, ref) => {
     const [currentTime, setCurrentTime] = useState(0);
@@ -36,6 +42,7 @@ const Timeline = forwardRef(
     const [viewStart, setViewStart] = useState(null);
     const [viewEnd, setViewEnd] = useState(null);
     const [selectedInterval, setSelectedInterval] = useState(null);
+    const [playMode, setPlayMode] = useState(null); // null | 'all' | 'selection'
 
     const audioRef = useRef(null);
     const overviewRef = useRef(null);
@@ -134,6 +141,30 @@ const Timeline = forwardRef(
       setViewEnd(ne);
     }, [clampView]);
 
+    // ── Обработчики ───────────────────────────────────────────────────────
+    const handleTimeUpdate = useCallback(
+      (time) => {
+        setCurrentTime(time);
+        const calcFrame = getFrameAtTime(time, frameTimes);
+        if (calcFrame !== currentFrameRef.current) {
+          currentFrameRef.current = calcFrame;
+          setFrame(calcFrame);
+        }
+      },
+      [frameTimes, setFrame],
+    );
+
+    const handleSeek = useCallback(
+      (time) => {
+        if (audioRef.current) audioRef.current.seek(time);
+        setCurrentTime(time);
+        const calcFrame = getFrameAtTime(time, frameTimes);
+        currentFrameRef.current = calcFrame;
+        setFrame(calcFrame);
+      },
+      [frameTimes, setFrame],
+    );
+
     // ── Play selection ────────────────────────────────────────────────────
     const stopSelection = useCallback(() => {
       if (stopCheckRef.current) {
@@ -144,26 +175,48 @@ const Timeline = forwardRef(
       audioRef.current?.pause();
     }, []);
 
-    const playInterval = useCallback((interval) => {
+    const playInterval = useCallback((interval, startFrom) => {
       if (!audioRef.current || !interval) return;
       if (stopCheckRef.current) {
         clearTimeout(stopCheckRef.current);
         stopCheckRef.current = null;
       }
-      const url = getAudioSegmentUrl(interval.start, interval.end);
-      audioRef.current.playSegmentUrl(url, interval.start);
+      const from = startFrom ?? interval.start;
+      const url = getAudioSegmentUrl(from, interval.end);
+      audioRef.current.playSegmentUrl(url, from);
       playingSelectionRef.current = true;
     }, []);
 
     const handlePlaySelection = useCallback(() => {
       const iv = selectedIntervalRef.current;
       if (!iv) return;
-      if (playingSelectionRef.current) {
+      if (playMode === "selection") {
         stopSelection();
+        handleSeek(iv.start);
+        setPlayMode(null);
         return;
       }
-      playInterval(iv);
-    }, [stopSelection, playInterval]);
+      if (playMode === "all") {
+        audioRef.current?.pause();
+      }
+
+      playInterval(iv, iv.start);
+      setPlayMode("selection");
+    }, [playMode, stopSelection, playInterval, handleSeek]);
+
+    const handlePlayAll = useCallback(() => {
+      if (!audioRef.current) return;
+      if (playMode === "all") {
+        audioRef.current.pause();
+        setPlayMode(null);
+      } else {
+        if (playMode === "selection") {
+          stopSelection();
+        }
+        audioRef.current.play();
+        setPlayMode("all");
+      }
+    }, [playMode, stopSelection]);
 
     useEffect(() => {
       return () => {
@@ -215,29 +268,12 @@ const Timeline = forwardRef(
       handlePlaySelection,
     ]);
 
-    // ── Обработчики ───────────────────────────────────────────────────────
-    const handleTimeUpdate = useCallback(
-      (time) => {
-        setCurrentTime(time);
-        const calcFrame = getFrameAtTime(time, frameTimes);
-        if (calcFrame !== currentFrameRef.current) {
-          currentFrameRef.current = calcFrame;
-          setFrame(calcFrame);
-        }
-      },
-      [frameTimes, setFrame],
-    );
-
-    const handleSeek = useCallback(
-      (time) => {
-        if (audioRef.current) audioRef.current.seek(time);
-        setCurrentTime(time);
-        const calcFrame = getFrameAtTime(time, frameTimes);
-        currentFrameRef.current = calcFrame;
-        setFrame(calcFrame);
-      },
-      [frameTimes, setFrame],
-    );
+    const handleResetSelection = useCallback(() => {
+      stopSelection();
+      setSelectedInterval(null);
+      setPlayMode(null);
+      handleSeek(0);
+    }, [stopSelection, handleSeek]);
 
     const handleSelectInterval = useCallback(
       (interval) => {
@@ -296,10 +332,19 @@ const Timeline = forwardRef(
       [handleSeek],
     );
 
-    const handlePlayStateChange = useCallback((playing) => {
-      setIsPlaying(playing);
-      if (!playing) playingSelectionRef.current = false;
-    }, []);
+    const handlePlayStateChange = useCallback(
+      (playing) => {
+        setIsPlaying(playing);
+        if (!playing) {
+          if (playingSelectionRef.current && selectedIntervalRef.current) {
+            handleSeek(selectedIntervalRef.current.start);
+          }
+          playingSelectionRef.current = false;
+          setPlayMode(null);
+        }
+      },
+      [handleSeek],
+    );
 
     const cursorRatio =
       effEnd > effStart ? (currentTime - effStart) / (effEnd - effStart) : 0;
@@ -333,13 +378,41 @@ const Timeline = forwardRef(
           <div className="tl-divider" />
 
           <button
+            className="tl-btn tl-btn-icon"
+            onClick={handlePlayAll}
+            title={playMode === "all" ? "Pause (Space)" : "Play all"}
+          >
+            {playMode === "all" ? "⏸️ Pause all" : "▶️ Play all"}
+          </button>
+
+          <button
             className={`tl-btn${selectedInterval ? " active" : ""}`}
             onClick={handlePlaySelection}
             disabled={!selectedInterval}
-            title="Play selection (Space)"
+            title={
+              playMode === "selection"
+                ? "Pause selection (Space)"
+                : "Play selection (Space)"
+            }
           >
-            ▶ Selection
+            {playMode === "selection"
+              ? "⏸️ Pause selection"
+              : "▶️ Play selection"}
           </button>
+
+          <button
+            className="tl-btn tl-btn-icon"
+            onClick={handleResetSelection}
+            title="Reset selection and position"
+          >
+            ↩️ Reset
+          </button>
+
+          <div className="tl-divider" />
+
+          <span className="tl-time">
+            {formatTime(currentTime)} / {formatTime(duration)}
+          </span>
         </div>
 
         {/* ── Spectrogram ── */}
@@ -364,9 +437,6 @@ const Timeline = forwardRef(
             const iv = selectedIntervalRef.current;
             if (iv) playInterval(iv);
           }}
-          isPlayingExternal={isPlaying}
-          viewStart={effStart}
-          viewEnd={effEnd}
         />
 
         {/* ── TimelineBar ── */}

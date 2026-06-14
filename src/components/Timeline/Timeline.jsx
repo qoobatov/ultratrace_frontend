@@ -354,8 +354,8 @@ const Timeline = forwardRef(
         {/* ── Toolbar ── */}
         <div className="timeline-toolbar">
           {[
-            { label: "−", title: "Zoom In (Ctrl+I)", action: zoomIn },
-            { label: "+", title: "Zoom Out (Ctrl+O)", action: zoomOut },
+            { label: "−", title: "Zoom In (Ctrl+I)", action: zoomOut },
+            { label: "+", title: "Zoom Out (Ctrl+O)", action: zoomIn },
             { label: "⊡", title: "Zoom All (Ctrl+A)", action: zoomAll },
             {
               label: "⊞",

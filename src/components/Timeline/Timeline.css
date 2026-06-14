@@ -137,8 +137,7 @@
 
 /* ── Tiers ── */
 .timeline-tiers {
-  padding: 0 8px 4px;
-  padding: 0 var(--tl-pad) 4px;
+  padding: 0px 4px;
 }
 
 .tier-row {

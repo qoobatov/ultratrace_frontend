@@ -278,9 +278,26 @@ const Timeline = forwardRef(
     const handleSelectInterval = useCallback(
       (interval) => {
         setSelectedInterval(interval);
-        handleSeek(interval.start);
+        if (frameTimes?.length) {
+          let idx = 0;
+          let minDiff = Infinity;
+          for (let i = 0; i < frameTimes.length; i++) {
+            const diff = Math.abs(frameTimes[i] - interval.start);
+            if (diff < minDiff) {
+              minDiff = diff;
+              idx = i;
+            }
+          }
+          const targetFrame = idx + 1;
+          if (audioRef.current) audioRef.current.seek(interval.start);
+          setCurrentTime(interval.start);
+          currentFrameRef.current = targetFrame;
+          setFrame(targetFrame);
+        } else {
+          handleSeek(interval.start);
+        }
       },
-      [handleSeek],
+      [handleSeek, frameTimes, setFrame],
     );
 
     const handleStop = useCallback(() => {
@@ -423,6 +440,7 @@ const Timeline = forwardRef(
             spectrogramParams={spectrogramParams}
             viewStart={effStart}
             viewEnd={effEnd}
+            selectedInterval={selectedInterval}
           />
         </div>
 
@@ -448,6 +466,7 @@ const Timeline = forwardRef(
           onFrameChange={setFrame}
           viewStart={effStart}
           viewEnd={effEnd}
+          selectedInterval={selectedInterval}
         />
 
         {/* ── TextGrid tiers ── */}
@@ -468,7 +487,6 @@ const Timeline = forwardRef(
           ref={overviewRef}
           onClick={handleOverviewClick}
         >
-          {/* Палочки только видимых кадров, растянуты на всю ширину */}
           {duration > 0 &&
             frameTimes &&
             frameTimes
@@ -482,7 +500,73 @@ const Timeline = forwardRef(
                   }}
                 />
               ))}
-          {/* Курсор в координатах текущего окна */}
+
+          {/* Подсветка выделенного интервала */}
+          {duration > 0 &&
+            selectedInterval &&
+            (() => {
+              const selStartRatio =
+                (selectedInterval.start - effStart) / (effEnd - effStart);
+              const selEndRatio =
+                (selectedInterval.end - effStart) / (effEnd - effStart);
+              return selStartRatio < 1 && selEndRatio > 0 ? (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    bottom: 0,
+                    left: `${Math.max(0, selStartRatio) * 100}%`,
+                    width: `${(Math.min(1, selEndRatio) - Math.max(0, selStartRatio)) * 100}%`,
+                    background: "rgba(89, 154, 255, 0.2)",
+                    pointerEvents: "none",
+                  }}
+                />
+              ) : null;
+            })()}
+
+          {/* Синяя линия — начало выделения */}
+          {duration > 0 &&
+            selectedInterval &&
+            (() => {
+              const ratio =
+                (selectedInterval.start - effStart) / (effEnd - effStart);
+              return ratio >= 0 && ratio <= 1 ? (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    bottom: 0,
+                    left: `${ratio * 100}%`,
+                    width: "2px",
+                    background: "#599aff",
+                    pointerEvents: "none",
+                  }}
+                />
+              ) : null;
+            })()}
+
+          {/* Синяя линия — конец выделения */}
+          {duration > 0 &&
+            selectedInterval &&
+            (() => {
+              const ratio =
+                (selectedInterval.end - effStart) / (effEnd - effStart);
+              return ratio >= 0 && ratio <= 1 ? (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    bottom: 0,
+                    left: `${ratio * 100}%`,
+                    width: "2px",
+                    background: "#599aff",
+                    pointerEvents: "none",
+                  }}
+                />
+              ) : null;
+            })()}
+
+          {/* Курсор */}
           {duration > 0 && cursorRatio >= 0 && cursorRatio <= 1 && (
             <div
               className="timeline-overview-cursor"

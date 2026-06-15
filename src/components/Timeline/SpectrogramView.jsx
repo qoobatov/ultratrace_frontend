@@ -7,6 +7,7 @@ const SpectrogramView = ({
   spectrogramParams,
   viewStart,
   viewEnd,
+  selectedInterval,
 }) => {
   const [imageUrl, setImageUrl] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -18,7 +19,6 @@ const SpectrogramView = ({
   useEffect(() => {
     if (!duration || !spectrogramParams) return;
 
-    // Дебаунс — не запрашиваем картинку при каждом шаге зума
     if (debounceRef.current) clearTimeout(debounceRef.current);
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
@@ -34,7 +34,7 @@ const SpectrogramView = ({
           ...spectrogramParams,
         }).toString();
       setImageUrl(url);
-    }, 300); // ждём 300мс после последнего изменения зума
+    }, 300);
 
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -42,13 +42,19 @@ const SpectrogramView = ({
   }, [duration, spectrogramParams, effStart, effEnd]);
 
   const viewDuration = effEnd - effStart;
-  const cursorRatio =
-    viewDuration > 0 ? (currentTime - effStart) / viewDuration : 0;
+
+  const toRatio = (t) => (viewDuration > 0 ? (t - effStart) / viewDuration : 0);
+
+  const cursorRatio = toRatio(currentTime);
   const cursorVisible = cursorRatio >= 0 && cursorRatio <= 1;
+
+  const selStartRatio = selectedInterval
+    ? toRatio(selectedInterval.start)
+    : null;
+  const selEndRatio = selectedInterval ? toRatio(selectedInterval.end) : null;
 
   return (
     <div style={{ position: "relative", marginTop: "4px" }}>
-      {/* Пока грузится новая картинка — показываем затемнение поверх старой */}
       {imageUrl && (
         <img
           src={imageUrl}
@@ -81,6 +87,23 @@ const SpectrogramView = ({
           Loading spectrogram...
         </div>
       )}
+
+      {/* Подсветка выделенного интервала */}
+      {selectedInterval && selStartRatio < 1 && selEndRatio > 0 && (
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            bottom: 0,
+            left: `${Math.max(0, selStartRatio) * 100}%`,
+            width: `${(Math.min(1, selEndRatio) - Math.max(0, selStartRatio)) * 100}%`,
+            background: "rgba(89, 154, 255, 0.15)",
+            pointerEvents: "none",
+          }}
+        />
+      )}
+
+      {/* Красная линия курсора */}
       {cursorVisible && (
         <div
           style={{
@@ -90,6 +113,36 @@ const SpectrogramView = ({
             left: `${cursorRatio * 100}%`,
             width: "1px",
             background: "#f38ba8",
+            pointerEvents: "none",
+          }}
+        />
+      )}
+
+      {/* Синяя линия — начало выделения */}
+      {selectedInterval && selStartRatio >= 0 && selStartRatio <= 1 && (
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            bottom: 0,
+            left: `${selStartRatio * 100}%`,
+            width: "2px",
+            background: "#599aff",
+            pointerEvents: "none",
+          }}
+        />
+      )}
+
+      {/* Синяя линия — конец выделения */}
+      {selectedInterval && selEndRatio >= 0 && selEndRatio <= 1 && (
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            bottom: 0,
+            left: `${selEndRatio * 100}%`,
+            width: "2px",
+            background: "#599aff",
             pointerEvents: "none",
           }}
         />

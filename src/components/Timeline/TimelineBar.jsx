@@ -16,6 +16,7 @@ const TimelineBar = ({
   onFrameChange,
   viewStart,
   viewEnd,
+  selectedInterval,
 }) => {
   const barRef = useRef(null);
 
@@ -28,17 +29,22 @@ const TimelineBar = ({
     const rect = barRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const ratio = Math.max(0, Math.min(1, x / rect.width));
-    // Переводим клик в абсолютное время с учётом окна
     const time = effStart + ratio * viewDuration;
     onSeek && onSeek(time);
     const frame = getFrameAtTime(time, frameTimes);
     onFrameChange && onFrameChange(frame);
   };
 
-  // Позиция курсора внутри видимого окна
-  const cursorRatio =
-    viewDuration > 0 ? (currentTime - effStart) / viewDuration : 0;
+  const toRatio = (t) => (viewDuration > 0 ? (t - effStart) / viewDuration : 0);
+
+  const cursorRatio = toRatio(currentTime);
   const cursorVisible = cursorRatio >= 0 && cursorRatio <= 1;
+
+  // Синие линии выделения
+  const selStartRatio = selectedInterval
+    ? toRatio(selectedInterval.start)
+    : null;
+  const selEndRatio = selectedInterval ? toRatio(selectedInterval.end) : null;
 
   return (
     <div
@@ -63,6 +69,22 @@ const TimelineBar = ({
           }}
         />
       )}
+
+      {/* Подсветка выделенного интервала */}
+      {selectedInterval && selStartRatio < 1 && selEndRatio > 0 && (
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            bottom: 0,
+            left: `${Math.max(0, selStartRatio) * 100}%`,
+            width: `${(Math.min(1, selEndRatio) - Math.max(0, selStartRatio)) * 100}%`,
+            background: "rgba(89, 154, 255, 0.2)",
+            pointerEvents: "none",
+          }}
+        />
+      )}
+
       {/* Красная линия курсора */}
       {cursorVisible && (
         <div
@@ -73,6 +95,36 @@ const TimelineBar = ({
             left: `${cursorRatio * 100}%`,
             width: "1px",
             background: "red",
+            pointerEvents: "none",
+          }}
+        />
+      )}
+
+      {/* Синяя линия — начало выделения */}
+      {selectedInterval && selStartRatio >= 0 && selStartRatio <= 1 && (
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            bottom: 0,
+            left: `${selStartRatio * 100}%`,
+            width: "2px",
+            background: "#599aff",
+            pointerEvents: "none",
+          }}
+        />
+      )}
+
+      {/* Синяя линия — конец выделения */}
+      {selectedInterval && selEndRatio >= 0 && selEndRatio <= 1 && (
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            bottom: 0,
+            left: `${selEndRatio * 100}%`,
+            width: "2px",
+            background: "#599aff",
             pointerEvents: "none",
           }}
         />

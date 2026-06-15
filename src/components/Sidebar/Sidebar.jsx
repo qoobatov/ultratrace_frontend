@@ -19,6 +19,8 @@ const DEFAULT_SPECTROGRAM_PARAMS = {
   dynamic_range: 90,
 };
 
+const DISPLAY_TIERS = ["sentence", "word", "orthographic vowel"];
+
 const Sidebar = ({
   activeTrace,
   onSelectTrace,
@@ -41,29 +43,48 @@ const Sidebar = ({
     spectrogramParams || DEFAULT_SPECTROGRAM_PARAMS,
   );
   const [localOffset, setLocalOffset] = useState(offset || 0);
-  const [tierStats, setTierStats] = useState({});
-  const [totalFrames, setTotalFrames] = useState(0);
+
+  // Annotations state
+  const [tierIntervals, setTierIntervals] = useState({});
+  const [frameTimes, setFrameTimes] = useState([]);
+  const [currentIndices, setCurrentIndices] = useState({});
 
   useEffect(() => {
     const loadStats = async () => {
       try {
         const intervals = await getTextGridIntervals();
         const ftData = await getFrameTimes();
-        const frameCount =
-          ftData.count || (ftData.times ? ftData.times.length : 0);
-        setTotalFrames(frameCount);
+        const times = ftData.times || [];
+        setFrameTimes(times);
+
         const grouped = {};
         intervals.forEach((item) => {
-          if (!grouped[item.tier]) grouped[item.tier] = 0;
-          grouped[item.tier]++;
+          if (!grouped[item.tier]) grouped[item.tier] = [];
+          grouped[item.tier].push(item);
         });
-        setTierStats(grouped);
+        Object.keys(grouped).forEach((tier) => {
+          grouped[tier].sort((a, b) => a.start - b.start);
+        });
+        setTierIntervals(grouped);
       } catch (err) {
         console.error("Failed to load TextGrid stats", err);
       }
     };
     loadStats();
   }, []);
+
+  useEffect(() => {
+    if (!frameTimes.length || !Object.keys(tierIntervals).length) return;
+    const t = frameTimes[frameNumber];
+    if (t == null) return;
+
+    const indices = {};
+    Object.entries(tierIntervals).forEach(([tier, intervals]) => {
+      indices[tier] = intervals.findIndex((iv) => t >= iv.start && t < iv.end);
+    });
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setCurrentIndices(indices);
+  }, [frameNumber, frameTimes, tierIntervals]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -176,6 +197,12 @@ const Sidebar = ({
     setLocalSpecParams((p) => ({ ...p, [field]: value }));
   };
 
+  const handleSpecLiveChange = (field, value) => {
+    const updated = { ...localSpecParams, [field]: value };
+    setLocalSpecParams(updated);
+    onSpectrogramParamsChange?.(updated);
+  };
+
   const handleSpecReset = () => {
     setLocalSpecParams(DEFAULT_SPECTROGRAM_PARAMS);
     onSpectrogramParamsChange?.(DEFAULT_SPECTROGRAM_PARAMS);
@@ -185,11 +212,9 @@ const Sidebar = ({
     onSpectrogramParamsChange?.(localSpecParams);
   };
 
-  const displayTiers = ["sentence", "word", "orthographic vowel"];
-
   return (
     <div className="sidebar">
-      {/* ── Zone 1: Landmarks — flex:1 растягивается напротив FrameCanvas ── */}
+      {/* ── Zone 1: Landmarks ── */}
       <div className="sidebar-zone zone-landmarks">
         <div className="sidebar-section-title">Landmarks</div>
         <ul className="trace-list">
@@ -291,7 +316,7 @@ const Sidebar = ({
         </div>
       </div>
 
-      {/* ── Zone 2: Spectrogram params — напротив спектрограммы ── */}
+      {/* ── Zone 2: Spectrogram params ── */}
       <div className="sidebar-zone zone-spectrogram">
         <div className="sidebar-section-title">Spectrogram</div>
         <div className="param-row">
@@ -303,7 +328,14 @@ const Sidebar = ({
             onChange={(e) =>
               handleSpecChange("freq_max", parseFloat(e.target.value) || 0)
             }
-            step="100"
+            onKeyUp={(e) => {
+              if (e.key === "ArrowUp" || e.key === "ArrowDown")
+                handleSpecLiveChange(
+                  "freq_max",
+                  parseFloat(e.target.value) || 0,
+                );
+            }}
+            step="10"
             min="0"
           />
         </div>
@@ -319,6 +351,13 @@ const Sidebar = ({
                 parseFloat(e.target.value) || 0.001,
               )
             }
+            onKeyUp={(e) => {
+              if (e.key === "ArrowUp" || e.key === "ArrowDown")
+                handleSpecLiveChange(
+                  "window_length",
+                  parseFloat(e.target.value) || 0.001,
+                );
+            }}
             step="0.001"
             min="0.001"
           />
@@ -332,7 +371,14 @@ const Sidebar = ({
             onChange={(e) =>
               handleSpecChange("dynamic_range", parseFloat(e.target.value) || 0)
             }
-            step="10"
+            onKeyUp={(e) => {
+              if (e.key === "ArrowUp" || e.key === "ArrowDown")
+                handleSpecLiveChange(
+                  "dynamic_range",
+                  parseFloat(e.target.value) || 0,
+                );
+            }}
+            step="1"
             min="0"
           />
         </div>
@@ -346,20 +392,24 @@ const Sidebar = ({
         </div>
       </div>
 
-      {/* ── Zone 3: Annotations — напротив TextGrid тиров ── */}
+      {/* ── Zone 3: Annotations ── */}
       <div className="sidebar-zone zone-annotations">
         <div className="sidebar-section-title">Annotations</div>
-        {displayTiers.map((tierName) => (
-          <div key={tierName} className="annotation-row">
-            <span className="annotation-label">{tierName}</span>
-            <span className="annotation-badge">
-              {tierStats[tierName] || 0}/{totalFrames}
-            </span>
-          </div>
-        ))}
+        {DISPLAY_TIERS.map((tierName) => {
+          const intervals = tierIntervals[tierName] || [];
+          const idx = currentIndices[tierName] ?? -1;
+          return (
+            <div key={tierName} className="annotation-row">
+              <span className="annotation-label">{tierName}</span>
+              <span className="annotation-badge">
+                {idx >= 0 ? idx + 1 : "—"} / {intervals.length}
+              </span>
+            </div>
+          );
+        })}
       </div>
 
-      {/* ── Zone 4: Offset — напротив overview ── */}
+      {/* ── Zone 4: Offset ── */}
       <div className="sidebar-zone zone-offset">
         <div className="sidebar-section-title">Offset</div>
         <div className="offset-row">

@@ -7,7 +7,12 @@ import {
   Circle,
   Line,
 } from "react-konva";
-import { getPoints, savePoints, getFrameUrl } from "../../api/client";
+import {
+  getPoints,
+  savePoints,
+  getFrameUrl,
+  autoTraceFrame,
+} from "../../api/client";
 
 const MAX_HISTORY = 50;
 const MIN_SCALE = 0.5;
@@ -44,6 +49,20 @@ const FrameCanvas = ({
   const mouseDownPos = useRef(null);
   const gestureStarted = useRef(false);
   const pointDragged = useRef(false);
+
+  // -----AUTO_TRACE:
+  const handleAutoTrace = async () => {
+    if (!activeTrace || !frameNumber) return;
+    try {
+      const pts = await autoTraceFrame(activeTrace, frameNumber);
+      setPoints(pts);
+      pushHistory(pts);
+      setSelectedIndices(new Set());
+      setSelectionFrozen(false);
+    } catch (err) {
+      console.error("Auto-trace failed", err);
+    }
+  };
 
   // Сбросить "заморозку" цвета выделения
   const thawSelection = () => setSelectionFrozen(false);
@@ -528,6 +547,10 @@ const FrameCanvas = ({
         <button onClick={redo} title="Redo (Ctrl+Shift+Z)">
           ↪️
         </button>
+        <button onClick={handleAutoTrace} title="Auto-trace">
+          🤖
+        </button>
+        ;
         <span style={{ color: "white", margin: "0 8px" }}>
           {selectedIndices.size > 0
             ? `${selectedIndices.size} selected`

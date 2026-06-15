@@ -114,4 +114,11 @@ export const getStudyOffset = async () => {
   return response.data;
 };
 
+export const autoTraceFrame = async (traceName, frameNumber) => {
+  const response = await client.post(
+    `/contours/traces/${traceName}/frames/${frameNumber}/auto-trace`,
+  );
+  return response.data.points;
+};
+
 export default client;

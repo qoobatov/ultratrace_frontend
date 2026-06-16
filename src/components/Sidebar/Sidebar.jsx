@@ -422,12 +422,12 @@ const Sidebar = ({
           />
           <span className="offset-unit">ms</span>
         </div>
-        <button
+        {/* <button
           className="sidebar-btn"
           onClick={() => onOffsetApply(localOffset)}
         >
           Apply
-        </button>
+        </button> */}
       </div>
 
       {/* ── Color picker modal ── */}

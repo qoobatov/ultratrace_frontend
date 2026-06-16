@@ -509,8 +509,8 @@ const FrameCanvas = ({
 
   if (!image) return <div>No frame loaded</div>;
 
-  const stageWidth = 800;
-  const stageHeight = 600;
+  const stageWidth = 730;
+  const stageHeight = 530;
   const baseScale = Math.min(
     stageWidth / image.width,
     stageHeight / image.height,

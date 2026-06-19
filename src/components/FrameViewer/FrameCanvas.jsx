@@ -25,6 +25,7 @@ const FrameCanvas = ({
   activeTrace,
   traceColor,
   pointsVersion,
+  studyVersion,
 }) => {
   const [image, setImage] = useState(null);
   const [points, setPoints] = useState([]);
@@ -97,7 +98,7 @@ const FrameCanvas = ({
     return () => {
       cancelled = true;
     };
-  }, [frameNumber, loadImage]);
+  }, [frameNumber, loadImage, studyVersion]);
 
   // --- Загрузка точек ---
   useEffect(() => {

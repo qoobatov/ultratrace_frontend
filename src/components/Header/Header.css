@@ -88,3 +88,8 @@
 .header-spacer {
   flex: 1;
 }
+
+.header-error {
+  color: red;
+  font-size: 0.9rem;
+}

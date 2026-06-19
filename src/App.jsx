@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useCallback, useRef } from "react";
 import FrameCanvas from "./components/FrameViewer/FrameCanvas";
 import Sidebar from "./components/Sidebar/Sidebar";
 import Timeline from "./components/Timeline/Timeline";
@@ -23,6 +23,7 @@ function App() {
     dynamic_range: 90,
   });
   const [offset, setOffset] = useState(0);
+  const [studyVersion, setStudyVersion] = useState(0);
 
   const timelineRef = useRef(null);
 
@@ -55,29 +56,40 @@ function App() {
     }
   }, []);
 
-  const fullRefresh = useCallback(async () => {
-    try {
-      const ftData = await getFrameTimes();
-      setFrameTimes(ftData.times || []);
-      setFrame(1);
-      const traceData = await getTraces();
-      setTraceColors(traceData.colors || {});
-      if (!activeTrace) {
-        const def =
-          traceData.default || (traceData.traces && traceData.traces[0]);
-        if (def) setActiveTrace(def);
-      }
-      setPointsVersion((v) => v + 1);
-      await loadOffset();
-    } catch (err) {
-      console.error("Full refresh failed", err);
-    }
-  }, [activeTrace, loadOffset]);
+  const fullRefresh = useCallback(
+    async (options = {}) => {
+      try {
+        const ftData = await getFrameTimes();
+        setFrameTimes(ftData.times || []);
+        setFrame(1);
+        const traceData = await getTraces();
+        setTraceColors(traceData.colors || {});
+        if (!activeTrace) {
+          const def =
+            traceData.default || (traceData.traces && traceData.traces[0]);
+          if (def) setActiveTrace(def);
+        }
+        setPointsVersion((v) => v + 1);
+        await loadOffset();
 
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fullRefresh();
-  }, []);
+        // Если смена метода – инкрементируем версию, чтобы Canvas перезагрузил текущий кадр
+        if (options.methodChanged) {
+          setStudyVersion((v) => v + 1);
+        }
+      } catch (err) {
+        console.error("Full refresh failed", err);
+      }
+    },
+    [activeTrace, loadOffset],
+  );
+
+  // onMethodChange теперь вызывается как fullRefresh({ methodChanged: true })
+  const handleMethodChange = useCallback(
+    (opts) => {
+      fullRefresh(opts);
+    },
+    [fullRefresh],
+  );
 
   const handleSelectTrace = (name) => setActiveTrace(name);
 
@@ -107,7 +119,7 @@ function App() {
         frame={frame}
         setFrame={setFrameAndSync}
         onFileChange={fullRefresh}
-        onMethodChange={fullRefresh}
+        onMethodChange={handleMethodChange}
       />
       <div className="app-body">
         <Sidebar
@@ -123,6 +135,7 @@ function App() {
         <main className="app-main">
           <div className="app-canvas-area">
             <FrameCanvas
+              key={studyVersion} // при смене метода полностью пересоздаст Canvas
               frameNumber={frame}
               activeTrace={activeTrace}
               traceColor={traceColors[activeTrace] || "red"}

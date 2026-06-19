@@ -12,30 +12,60 @@ const Header = ({ frame, setFrame, onFileChange, onMethodChange }) => {
   const [selectedFile, setSelectedFile] = useState(0);
   const [methods, setMethods] = useState([]);
   const [selectedMethod, setSelectedMethod] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
 
+  // Первоначальная загрузка списка файлов и методов
   useEffect(() => {
-    getStudyFiles().then((data) => {
-      setFiles(data);
-      if (data.length > 0) setSelectedFile(data[0].index);
-    });
-    getAvailableMethods().then(setMethods);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIsLoading(true);
+    Promise.all([getStudyFiles(), getAvailableMethods()])
+      .then(([filesData, methodsData]) => {
+        setFiles(filesData);
+        if (filesData.length > 0) setSelectedFile(filesData[0].index);
+        setMethods(methodsData);
+      })
+      .catch((err) => {
+        setError("Failed to load study data");
+        console.error(err);
+      })
+      .finally(() => setIsLoading(false));
   }, []);
 
   const handleFileChange = async (e) => {
     const idx = Number(e.target.value);
     setSelectedFile(idx);
-    await switchFile(idx);
-    onFileChange && onFileChange();
-    const newMethods = await getAvailableMethods();
-    setMethods(newMethods);
-    if (newMethods.length > 0) setSelectedMethod(newMethods[0]);
+    setIsLoading(true);
+    setError(null);
+    try {
+      await switchFile(idx);
+      onFileChange && onFileChange();
+      const newMethods = await getAvailableMethods();
+      setMethods(newMethods);
+      if (newMethods.length > 0) setSelectedMethod(newMethods[0]);
+    } catch (err) {
+      setError("Failed to switch file");
+      console.error(err);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleMethodChange = async (e) => {
     const method = e.target.value;
     setSelectedMethod(method);
-    await changeMethod(method);
-    onMethodChange && onMethodChange();
+    setIsLoading(true);
+    setError(null);
+    try {
+      await changeMethod(method);
+      // Сообщаем App, что метод изменён, чтобы обновить кадр
+      if (onMethodChange) onMethodChange({ methodChanged: true });
+    } catch (err) {
+      setError("Failed to change method");
+      console.error(err);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -49,6 +79,7 @@ const Header = ({ frame, setFrame, onFileChange, onMethodChange }) => {
           className="header-select"
           value={selectedFile}
           onChange={handleFileChange}
+          disabled={isLoading}
         >
           {files.map((f) => (
             <option key={f.index} value={f.index}>
@@ -61,6 +92,7 @@ const Header = ({ frame, setFrame, onFileChange, onMethodChange }) => {
           className="header-select"
           value={selectedMethod}
           onChange={handleMethodChange}
+          disabled={isLoading}
         >
           {methods.map((m) => (
             <option key={m} value={m}>
@@ -71,12 +103,22 @@ const Header = ({ frame, setFrame, onFileChange, onMethodChange }) => {
 
         <button
           className="header-btn"
-          onClick={() => onFileChange && onFileChange()}
+          onClick={() => {
+            setIsLoading(true);
+            try {
+              onFileChange && onFileChange();
+            } finally {
+              setIsLoading(false);
+            }
+          }}
+          disabled={isLoading}
           title="Reload frames"
         >
-          ↺ Reload
+          {isLoading ? "Loading…" : "↺ Reload"}
         </button>
       </div>
+
+      {error && <div className="header-error">{error}</div>}
 
       <div className="header-divider" />
 

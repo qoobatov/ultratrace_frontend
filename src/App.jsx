@@ -38,31 +38,17 @@ function App() {
     });
   }, []);
 
-  const refreshFrameTimes = useCallback(async () => {
-    try {
-      const data = await getFrameTimes();
-      setFrameTimes(data.times || []);
-    } catch (err) {
-      console.error("Failed to refresh frame times", err);
-    }
-  }, []);
-
-  const loadOffset = useCallback(async () => {
-    try {
-      const res = await getStudyOffset();
-      setOffset(res.offset);
-    } catch (err) {
-      console.error("Failed to load offset", err);
-    }
-  }, []);
-
   const fullRefresh = useCallback(
     async (options = {}) => {
       try {
-        const ftData = await getFrameTimes();
+        const [ftData, traceData, offsetRes] = await Promise.all([
+          getFrameTimes(),
+          getTraces(),
+          getStudyOffset(),
+        ]);
+
         setFrameTimes(ftData.times || []);
         setFrame(1);
-        const traceData = await getTraces();
         setTraceColors(traceData.colors || {});
         if (!activeTrace) {
           const def =
@@ -70,9 +56,8 @@ function App() {
           if (def) setActiveTrace(def);
         }
         setPointsVersion((v) => v + 1);
-        await loadOffset();
+        setOffset(offsetRes.offset);
 
-        // Если смена метода – инкрементируем версию, чтобы Canvas перезагрузил текущий кадр
         if (options.methodChanged) {
           setStudyVersion((v) => v + 1);
         }
@@ -80,10 +65,9 @@ function App() {
         console.error("Full refresh failed", err);
       }
     },
-    [activeTrace, loadOffset],
+    [activeTrace],
   );
 
-  // onMethodChange теперь вызывается как fullRefresh({ methodChanged: true })
   const handleMethodChange = useCallback(
     (opts) => {
       fullRefresh(opts);
@@ -107,7 +91,8 @@ function App() {
     try {
       await setFrameOffset(newOffsetMs);
       setOffset(newOffsetMs);
-      refreshFrameTimes();
+      const ftData = await getFrameTimes();
+      setFrameTimes(ftData.times || []);
     } catch (err) {
       console.error("Failed to apply offset", err);
     }
@@ -135,7 +120,7 @@ function App() {
         <main className="app-main">
           <div className="app-canvas-area">
             <FrameCanvas
-              key={studyVersion} // при смене метода полностью пересоздаст Canvas
+              key={studyVersion}
               frameNumber={frame}
               activeTrace={activeTrace}
               traceColor={traceColors[activeTrace] || "red"}

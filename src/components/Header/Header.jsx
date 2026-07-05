@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   getStudyFiles,
   switchFile,
@@ -14,6 +14,9 @@ const Header = ({ frame, setFrame, onFileChange, onMethodChange }) => {
   const [selectedMethod, setSelectedMethod] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [inputValue, setInputValue] = useState(String(frame));
+
+  const debounceRef = useRef(null);
 
   // Первоначальная загрузка списка файлов и методов
   useEffect(() => {
@@ -24,6 +27,7 @@ const Header = ({ frame, setFrame, onFileChange, onMethodChange }) => {
         setFiles(filesData);
         if (filesData.length > 0) setSelectedFile(filesData[0].index);
         setMethods(methodsData);
+        if (methodsData.length > 0) setSelectedMethod(methodsData[0]);
       })
       .catch((err) => {
         setError("Failed to load study data");
@@ -31,6 +35,17 @@ const Header = ({ frame, setFrame, onFileChange, onMethodChange }) => {
       })
       .finally(() => setIsLoading(false));
   }, []);
+
+  const handleFrameInput = (e) => {
+    const raw = e.target.value;
+    setInputValue(raw);
+
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      const num = Number(raw);
+      if (num >= 1) setFrame(num);
+    }, 300);
+  };
 
   const handleFileChange = async (e) => {
     const idx = Number(e.target.value);
@@ -58,7 +73,6 @@ const Header = ({ frame, setFrame, onFileChange, onMethodChange }) => {
     setError(null);
     try {
       await changeMethod(method);
-      // Сообщаем App, что метод изменён, чтобы обновить кадр
       if (onMethodChange) onMethodChange({ methodChanged: true });
     } catch (err) {
       setError("Failed to change method");
@@ -133,8 +147,9 @@ const Header = ({ frame, setFrame, onFileChange, onMethodChange }) => {
         <input
           className="header-frame-input"
           type="number"
-          value={frame}
-          onChange={(e) => setFrame(Number(e.target.value))}
+          value={inputValue}
+          onChange={handleFrameInput}
+          onBlur={() => setInputValue(String(frame))} // при потере фокуса синхронизируем
           title="Frame number"
         />
         <button

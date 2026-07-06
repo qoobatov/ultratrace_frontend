@@ -236,10 +236,16 @@
 .sidebar-btn-row {
   display: flex;
   gap: 4px;
+  flex-wrap: wrap;
 }
 
 .sidebar-btn-row .sidebar-btn {
   flex: 1;
+  min-width: 60px;
+}
+
+.sidebar-btn-row.export-row {
+  margin-top: 2px;
 }
 
 /* ── Annotations stats ── */

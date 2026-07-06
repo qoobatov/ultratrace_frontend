@@ -10,6 +10,7 @@ import {
   clearAllPoints,
   getTextGridIntervals,
   getFrameTimes,
+  exportContours,
 } from "../../api/client";
 import "./Sidebar.css";
 
@@ -29,7 +30,7 @@ const Sidebar = ({
   spectrogramParams,
   onSpectrogramParamsChange,
   offset,
-  onOffsetApply,
+  // onOffsetApply,
 }) => {
   const [traces, setTraces] = useState([]);
   const [traceColors, setTraceColors] = useState({});
@@ -313,6 +314,15 @@ const Sidebar = ({
           >
             Clear All
           </button>
+          <div className="sidebar-btn-row export-row">
+            <button
+              className="sidebar-btn"
+              onClick={exportContours}
+              title="Export all annotated points to CSV"
+            >
+              ↓ Export CSV
+            </button>
+          </div>
         </div>
       </div>
 

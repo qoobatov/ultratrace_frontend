@@ -121,4 +121,9 @@ export const autoTraceFrame = async (traceName, frameNumber) => {
   return response.data.points;
 };
 
+export const exportContours = () => {
+  // Открываем напрямую в браузере — файл скачается автоматически
+  window.open(`${API_BASE}/contours/export`, "_blank");
+};
+
 export default client;

@@ -17,6 +17,15 @@ const Header = ({ frame, setFrame, onFileChange, onMethodChange }) => {
   const [inputValue, setInputValue] = useState(String(frame));
 
   const debounceRef = useRef(null);
+  const inputRef = useRef(null);
+
+  // Синхронизируем inputValue с frame когда он меняется снаружи,
+  // но только если пользователь сейчас не редактирует поле
+  useEffect(() => {
+    if (document.activeElement !== inputRef.current) {
+      setInputValue(String(frame));
+    }
+  }, [frame]);
 
   // Первоначальная загрузка списка файлов и методов
   useEffect(() => {
@@ -45,6 +54,13 @@ const Header = ({ frame, setFrame, onFileChange, onMethodChange }) => {
       const num = Number(raw);
       if (num >= 1) setFrame(num);
     }, 300);
+  };
+
+  const handleFrameBlur = () => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    const num = Number(inputValue);
+    if (num >= 1) setFrame(num);
+    else setInputValue(String(frame));
   };
 
   const handleFileChange = async (e) => {
@@ -145,11 +161,12 @@ const Header = ({ frame, setFrame, onFileChange, onMethodChange }) => {
           ‹
         </button>
         <input
+          ref={inputRef}
           className="header-frame-input"
           type="number"
           value={inputValue}
           onChange={handleFrameInput}
-          onBlur={() => setInputValue(String(frame))} // при потере фокуса синхронизируем
+          onBlur={handleFrameBlur}
           title="Frame number"
         />
         <button

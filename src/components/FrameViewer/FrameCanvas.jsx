@@ -30,7 +30,6 @@ const FrameCanvas = ({
   const [image, setImage] = useState(null);
   const [points, setPoints] = useState([]);
   const [selectedIndices, setSelectedIndices] = useState(new Set());
-  // Флаг: выделение "зафиксировано" и отображается цветом до следующего действия
   const [selectionFrozen, setSelectionFrozen] = useState(false);
   const [history, setHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -38,6 +37,7 @@ const FrameCanvas = ({
   const imageRef = useRef(null);
   const imageCache = useRef(new Map());
   const isShiftDown = useRef(false);
+  const clipboardRef = useRef(null); // Буфер обмена для точек
 
   const [stageScale, setStageScale] = useState(1);
   const [stageX, setStageX] = useState(0);
@@ -51,7 +51,7 @@ const FrameCanvas = ({
   const gestureStarted = useRef(false);
   const pointDragged = useRef(false);
 
-  // -----AUTO_TRACE:
+  // ----- AUTO_TRACE -----
   const handleAutoTrace = async () => {
     if (!activeTrace || !frameNumber) return;
     try {
@@ -65,7 +65,6 @@ const FrameCanvas = ({
     }
   };
 
-  // Сбросить "заморозку" цвета выделения
   const thawSelection = () => setSelectionFrozen(false);
 
   // --- Загрузка изображения ---
@@ -161,6 +160,8 @@ const FrameCanvas = ({
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.key === "Shift") isShiftDown.current = true;
+
+      // Удаление
       if (
         (e.key === "Delete" || e.key === "Backspace") &&
         selectedIndices.size > 0 &&
@@ -173,15 +174,49 @@ const FrameCanvas = ({
         setSelectedIndices(new Set());
         setSelectionFrozen(false);
       }
+
+      // Отмена / повтор
       if ((e.ctrlKey || e.metaKey) && e.key === "z") {
         e.preventDefault();
         if (e.shiftKey) redo();
         else undo();
       }
+
+      // Копировать (Ctrl+C)
+      if ((e.ctrlKey || e.metaKey) && e.key === "c") {
+        if (selectedIndices.size > 0) {
+          const selectedPts = [];
+          selectedIndices.forEach((i) => {
+            if (i < points.length) selectedPts.push({ ...points[i] });
+          });
+          clipboardRef.current = selectedPts;
+          console.log(`Copied ${selectedPts.length} points`);
+          e.preventDefault();
+        }
+      }
+
+      // Вставить (Ctrl+V)
+      if ((e.ctrlKey || e.metaKey) && e.key === "v") {
+        if (
+          clipboardRef.current &&
+          clipboardRef.current.length > 0 &&
+          activeTrace
+        ) {
+          const newPoints = [...points, ...clipboardRef.current];
+          setPoints(newPoints);
+          savePoints(activeTrace, frameNumber, newPoints);
+          pushHistory(newPoints);
+          setSelectedIndices(new Set());
+          setSelectionFrozen(false);
+          e.preventDefault();
+        }
+      }
     };
+
     const handleKeyUp = (e) => {
       if (e.key === "Shift") isShiftDown.current = false;
     };
+
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("keyup", handleKeyUp);
     return () => {
@@ -223,7 +258,7 @@ const FrameCanvas = ({
       (p) => Math.hypot(p.x - rel.x, p.y - rel.y) < minDistRel,
     );
     if (tooClose) return;
-    thawSelection(); // добавление точки сбрасывает цвет выделения
+    thawSelection();
     const newPoints = [...points, { x: rel.x, y: rel.y }];
     setPoints(newPoints);
     savePoints(activeTrace, frameNumber, newPoints);
@@ -266,11 +301,9 @@ const FrameCanvas = ({
       return;
     gestureStarted.current = true;
 
-    // Shift зажат → всегда рамка выделения, даже при zoom > 1
     const shouldSelect = stageScale <= 1 || isShiftDown.current;
 
     if (!shouldSelect) {
-      // Панорамирование
       if (!isPanning) {
         setIsPanning(true);
         lastPointer.current = { x: pointerPos.x, y: pointerPos.y };
@@ -282,7 +315,6 @@ const FrameCanvas = ({
         setStageY((prev) => prev + pdy);
       }
     } else {
-      // Рамка выделения
       setIsSelecting(true);
       setSelectionRect({
         x1: mouseDownPos.current.x,
@@ -329,7 +361,7 @@ const FrameCanvas = ({
         });
         if (newSelected.size > 0) {
           setSelectedIndices(newSelected);
-          setSelectionFrozen(true); // фиксируем цвет после рамки
+          setSelectionFrozen(true);
         } else {
           setSelectedIndices(new Set());
           setSelectionFrozen(false);
@@ -340,9 +372,7 @@ const FrameCanvas = ({
       return;
     }
 
-    // Клик по фону
     if (!gestureStarted.current && mouseDownPos.current) {
-      // Клик по пустому месту сбрасывает выделение и цвет
       setSelectedIndices(new Set());
       setSelectionFrozen(false);
       addPointAt(stageRef.current.getPointerPosition());
@@ -362,13 +392,12 @@ const FrameCanvas = ({
         const newSet = new Set(prev);
         if (newSet.has(index)) newSet.delete(index);
         else newSet.add(index);
-        // Фиксируем цвет если что-то выделено
         setSelectionFrozen(newSet.size > 0);
         return newSet;
       });
     } else {
       setSelectedIndices(new Set([index]));
-      setSelectionFrozen(true); // клик по точке фиксирует цвет
+      setSelectionFrozen(true);
     }
   };
 
@@ -376,7 +405,7 @@ const FrameCanvas = ({
     e.cancelBubble = true;
     pointDragged.current = false;
     mouseDownPos.current = null;
-    thawSelection(); // начало drag сбрасывает цвет
+    thawSelection();
     if (!selectedIndices.has(index)) setSelectedIndices(new Set([index]));
   };
 
@@ -479,8 +508,6 @@ const FrameCanvas = ({
     setPoints(newPoints);
     savePoints(activeTrace, frameNumber, newPoints);
     pushHistory(newPoints);
-    // После drag выделение остаётся, но цвет сбрасывается — следующее действие уберёт highlight
-    // (уже сброшено в dragStart через thawSelection)
   };
 
   // --- Зум ---
@@ -551,7 +578,6 @@ const FrameCanvas = ({
         <button onClick={handleAutoTrace} title="Auto-trace">
           🤖
         </button>
-        ;
         <span style={{ color: "white", margin: "0 8px" }}>
           {selectedIndices.size > 0
             ? `${selectedIndices.size} selected`
@@ -605,7 +631,6 @@ const FrameCanvas = ({
               const cx = point.x * image.width * baseScale;
               const cy = point.y * image.height * baseScale;
               const isSelected = selectedIndices.has(i);
-              // Цвет: cyan если выделено и заморожено, yellow если выделено в процессе, иначе traceColor
               const ptColor = isSelected
                 ? selectionFrozen
                   ? SELECTED_COLOR

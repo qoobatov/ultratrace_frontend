@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import FrameCanvas from "./components/FrameViewer/FrameCanvas";
 import Sidebar from "./components/Sidebar/Sidebar";
 import Timeline from "./components/Timeline/Timeline";
@@ -67,6 +67,12 @@ function App() {
     },
     [activeTrace],
   );
+
+  // Загружаем данные при первом маунте
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fullRefresh();
+  }, []);
 
   const handleMethodChange = useCallback(
     (opts) => {

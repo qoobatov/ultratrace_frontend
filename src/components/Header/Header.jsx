@@ -4,10 +4,19 @@ import {
   switchFile,
   getAvailableMethods,
   changeMethod,
+  getAnnotatedCount,
 } from "../../api/client";
 import "./Header.css";
 
-const Header = ({ frame, setFrame, onFileChange, onMethodChange }) => {
+const Header = ({
+  frame,
+  setFrame,
+  onFileChange,
+  onMethodChange,
+  activeTrace,
+  totalFrames,
+  pointsVersion,
+}) => {
   const [files, setFiles] = useState([]);
   const [selectedFile, setSelectedFile] = useState(0);
   const [methods, setMethods] = useState([]);
@@ -15,17 +24,29 @@ const Header = ({ frame, setFrame, onFileChange, onMethodChange }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [inputValue, setInputValue] = useState(String(frame));
+  const [annotatedCount, setAnnotatedCount] = useState(null);
 
   const debounceRef = useRef(null);
   const inputRef = useRef(null);
 
-  // Синхронизируем inputValue с frame когда он меняется снаружи,
-  // но только если пользователь сейчас не редактирует поле
+  // Синхронизируем inputValue с frame когда он меняется снаружи
   useEffect(() => {
     if (document.activeElement !== inputRef.current) {
       setInputValue(String(frame));
     }
   }, [frame]);
+
+  // Загружаем счётчик аннотированных кадров когда меняется трасса или точки
+  useEffect(() => {
+    if (!activeTrace) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setAnnotatedCount(null);
+      return;
+    }
+    getAnnotatedCount(activeTrace)
+      .then((data) => setAnnotatedCount(data.count))
+      .catch(() => setAnnotatedCount(null));
+  }, [activeTrace, pointsVersion]);
 
   // Первоначальная загрузка списка файлов и методов
   useEffect(() => {
@@ -176,6 +197,15 @@ const Header = ({ frame, setFrame, onFileChange, onMethodChange }) => {
         >
           ›
         </button>
+
+        {annotatedCount !== null && totalFrames > 0 && (
+          <span
+            className="header-annotated"
+            title={`Annotated frames for "${activeTrace}"`}
+          >
+            {annotatedCount} / {totalFrames} Annotated frames
+          </span>
+        )}
       </div>
 
       <div className="header-spacer" />

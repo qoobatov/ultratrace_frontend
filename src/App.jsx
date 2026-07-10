@@ -111,6 +111,9 @@ function App() {
         setFrame={setFrameAndSync}
         onFileChange={fullRefresh}
         onMethodChange={handleMethodChange}
+        activeTrace={activeTrace}
+        totalFrames={frameTimes.length}
+        pointsVersion={pointsVersion}
       />
       <div className="app-body">
         <Sidebar
@@ -131,6 +134,7 @@ function App() {
               activeTrace={activeTrace}
               traceColor={traceColors[activeTrace] || "red"}
               pointsVersion={pointsVersion}
+              onPointsSaved={() => setPointsVersion((v) => v + 1)}
             />
           </div>
           <Timeline

@@ -93,3 +93,10 @@
   color: red;
   font-size: 0.9rem;
 }
+
+.header-annotated {
+  font-size: 11px;
+  color: #6c7086;
+  white-space: nowrap;
+  padding-left: 6px;
+}

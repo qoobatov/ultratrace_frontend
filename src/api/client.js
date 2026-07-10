@@ -126,4 +126,11 @@ export const exportContours = () => {
   window.open(`${API_BASE}/contours/export`, "_blank");
 };
 
+export const getAnnotatedCount = async (traceName) => {
+  const response = await client.get(
+    `/contours/traces/${traceName}/annotated-count`,
+  );
+  return response.data;
+};
+
 export default client;

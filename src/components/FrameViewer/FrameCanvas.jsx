@@ -26,6 +26,7 @@ const FrameCanvas = ({
   traceColor,
   pointsVersion,
   studyVersion,
+  onPointsSaved,
 }) => {
   const [image, setImage] = useState(null);
   const [points, setPoints] = useState([]);
@@ -60,6 +61,7 @@ const FrameCanvas = ({
       pushHistory(pts);
       setSelectedIndices(new Set());
       setSelectionFrozen(false);
+      onPointsSaved?.();
     } catch (err) {
       console.error("Auto-trace failed", err);
     }
@@ -138,7 +140,9 @@ const FrameCanvas = ({
       setHistoryIndex(newIdx);
       const oldState = history[newIdx];
       setPoints(oldState.points);
-      savePoints(activeTrace, frameNumber, oldState.points);
+      savePoints(activeTrace, frameNumber, oldState.points).then(() =>
+        onPointsSaved?.(),
+      );
       setSelectedIndices(new Set());
       setSelectionFrozen(false);
     }
@@ -150,7 +154,9 @@ const FrameCanvas = ({
       setHistoryIndex(newIdx);
       const nextState = history[newIdx];
       setPoints(nextState.points);
-      savePoints(activeTrace, frameNumber, nextState.points);
+      savePoints(activeTrace, frameNumber, nextState.points).then(() =>
+        onPointsSaved?.(),
+      );
       setSelectedIndices(new Set());
       setSelectionFrozen(false);
     }
@@ -169,7 +175,9 @@ const FrameCanvas = ({
       ) {
         const newPoints = points.filter((_, i) => !selectedIndices.has(i));
         setPoints(newPoints);
-        savePoints(activeTrace, frameNumber, newPoints);
+        savePoints(activeTrace, frameNumber, newPoints).then(() =>
+          onPointsSaved?.(),
+        );
         pushHistory(newPoints);
         setSelectedIndices(new Set());
         setSelectionFrozen(false);
@@ -204,7 +212,9 @@ const FrameCanvas = ({
         ) {
           const newPoints = [...points, ...clipboardRef.current];
           setPoints(newPoints);
-          savePoints(activeTrace, frameNumber, newPoints);
+          savePoints(activeTrace, frameNumber, newPoints).then(() =>
+            onPointsSaved?.(),
+          );
           pushHistory(newPoints);
           setSelectedIndices(new Set());
           setSelectionFrozen(false);
@@ -261,7 +271,9 @@ const FrameCanvas = ({
     thawSelection();
     const newPoints = [...points, { x: rel.x, y: rel.y }];
     setPoints(newPoints);
-    savePoints(activeTrace, frameNumber, newPoints);
+    savePoints(activeTrace, frameNumber, newPoints).then(() =>
+      onPointsSaved?.(),
+    );
     pushHistory(newPoints);
   };
 
@@ -506,7 +518,9 @@ const FrameCanvas = ({
     }
 
     setPoints(newPoints);
-    savePoints(activeTrace, frameNumber, newPoints);
+    savePoints(activeTrace, frameNumber, newPoints).then(() =>
+      onPointsSaved?.(),
+    );
     pushHistory(newPoints);
   };
 

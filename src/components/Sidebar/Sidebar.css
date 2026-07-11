@@ -244,7 +244,7 @@
 
 .sidebar-btn-row .sidebar-btn {
   flex: 1;
-  min-width: 60px;
+  /* min-width: 60px; */
 }
 
 .sidebar-btn-row.export-row {

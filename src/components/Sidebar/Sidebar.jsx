@@ -30,7 +30,7 @@ const Sidebar = ({
   spectrogramParams,
   onSpectrogramParamsChange,
   offset,
-  // onOffsetApply,
+  onOffsetApply,
 }) => {
   const [traces, setTraces] = useState([]);
   const [traceColors, setTraceColors] = useState({});
@@ -444,13 +444,13 @@ const Sidebar = ({
             step="1"
           />
           <span className="offset-unit">ms</span>
+          <button
+            className="sidebar-btn"
+            onClick={() => onOffsetApply(localOffset)}
+          >
+            Apply
+          </button>
         </div>
-        {/* <button
-          className="sidebar-btn"
-          onClick={() => onOffsetApply(localOffset)}
-        >
-          Apply
-        </button> */}
       </div>
 
       {/* ── Color picker modal ── */}

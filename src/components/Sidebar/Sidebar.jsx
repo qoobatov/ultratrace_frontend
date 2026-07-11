@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   getTraces,
   createTrace,
@@ -49,6 +49,7 @@ const Sidebar = ({
   const [tierIntervals, setTierIntervals] = useState({});
   const [frameTimes, setFrameTimes] = useState([]);
   const [currentIndices, setCurrentIndices] = useState({});
+  const cancelRef = useRef(false);
 
   useEffect(() => {
     const loadStats = async () => {
@@ -233,10 +234,22 @@ const Sidebar = ({
                   className="trace-rename-input"
                   value={renameValue}
                   onChange={(e) => setRenameValue(e.target.value)}
-                  onBlur={() => setRenameTarget(null)}
+                  onBlur={() => {
+                    if (cancelRef.current) {
+                      cancelRef.current = false;
+                      setRenameTarget(null);
+                      return;
+                    }
+                    handleRename(name);
+                  }}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") handleRename(name);
-                    if (e.key === "Escape") setRenameTarget(null);
+                    if (e.key === "Enter") {
+                      e.target.blur(); // сохранит через onBlur выше
+                    }
+                    if (e.key === "Escape") {
+                      cancelRef.current = true;
+                      e.target.blur(); // отменит, не сохраняя
+                    }
                   }}
                   autoFocus
                 />

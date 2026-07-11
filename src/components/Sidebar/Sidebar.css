@@ -150,6 +150,9 @@
 
 .trace-rename-input {
   flex: 1;
+  box-sizing: border-box;
+  min-width: 0;
+  width: 0;
   background: #313244;
   border: 1px solid #585b70;
   border-radius: 3px;

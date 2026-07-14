@@ -133,4 +133,9 @@ export const getAnnotatedCount = async (traceName) => {
   return response.data;
 };
 
+export const rescanStudy = async () => {
+  const response = await client.post("/study/rescan");
+  return response.data;
+};
+
 export default client;

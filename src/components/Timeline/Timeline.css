@@ -136,19 +136,46 @@
 }
 
 /* ── Tiers ── */
-.timeline-tiers {
-  padding: 0px 4px;
+.tiers-container {
+  display: flex;
+  flex-direction: column;
+  padding: 0 var(--tl-pad, 4px);
+}
+
+.tier-with-label {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid #11111b;
+  background: #181825;
+  transition: height 0.18s ease;
+  overflow: hidden;
+}
+
+.tier-with-label:last-child {
+  border-bottom: none;
+}
+
+.tier-label {
+  width: 80px;
+  flex-shrink: 0;
+  padding: 0 6px;
+  display: flex;
+  align-items: center;
+  font-size: 9px;
+  line-height: 1.15;
+  color: #a6adc8;
+  background: #1e1e2e;
+  border-right: 1px solid #313244;
+  overflow: hidden;
+  word-break: break-word;
 }
 
 .tier-row {
-  display: flex;
-  align-items: stretch;
-  height: 22px;
-  background: #181825;
   position: relative;
-  margin-bottom: 2px;
-  border-radius: 2px;
-  overflow: hidden;
+  flex: 1;
+  min-width: 0;
+  background: #181825;
+  transition: opacity 0.18s ease;
 }
 
 .tier-interval {
@@ -159,16 +186,18 @@
   align-items: center;
   justify-content: center;
   font-size: 10px;
+  line-height: 1.15;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  word-break: break-word;
+  text-align: center;
   cursor: pointer;
   border-right: 1px solid #313244;
   box-sizing: border-box;
   color: #cdd6f4;
   background: #2a2a3e;
   transition: background 0.1s;
-  padding: 0 3px;
+  padding: 2px 3px;
 }
 
 .tier-interval:hover {
@@ -184,6 +213,18 @@
   color: #89b4fa;
   font-weight: 600;
   border-color: #89b4fa;
+}
+
+/* Свёрнутый тир: текст прячем, оставляем цветные полоски */
+.tier-with-label.is-collapsed .tier-label {
+  font-size: 0;
+  padding: 0;
+}
+
+.tier-with-label.is-collapsed .tier-interval {
+  font-size: 0;
+  padding: 0;
+  border-right: none;
 }
 
 /* ── Mini overview scrubber ── */

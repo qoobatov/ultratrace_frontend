@@ -14,12 +14,6 @@ import {
 import { HexColorPicker } from "react-colorful";
 import "./Sidebar.css";
 
-const DEFAULT_SPECTROGRAM_PARAMS = {
-  freq_max: 5000,
-  window_length: 0.005,
-  dynamic_range: 90,
-};
-
 const DISPLAY_TIERS = ["sentence", "word", "orthographic vowel"];
 
 const Sidebar = ({
@@ -32,8 +26,6 @@ const Sidebar = ({
   onToggleTraceVisibility,
   onTracesUpdate,
   frameNumber,
-  spectrogramParams,
-  onSpectrogramParamsChange,
   offset,
   onOffsetApply,
 }) => {
@@ -42,9 +34,6 @@ const Sidebar = ({
   const [renameValue, setRenameValue] = useState("");
   const [colorPickerVisible, setColorPickerVisible] = useState(null);
   const [pendingColor, setPendingColor] = useState("#ffffff");
-  const [localSpecParams, setLocalSpecParams] = useState(
-    spectrogramParams || DEFAULT_SPECTROGRAM_PARAMS,
-  );
   const [localOffset, setLocalOffset] = useState(offset || 0);
 
   // Annotations state
@@ -89,11 +78,6 @@ const Sidebar = ({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setCurrentIndices(indices);
   }, [frameNumber, frameTimes, tierIntervals]);
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (spectrogramParams) setLocalSpecParams(spectrogramParams);
-  }, [spectrogramParams]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -179,25 +163,6 @@ const Sidebar = ({
     }
   };
 
-  const handleSpecChange = (field, value) => {
-    setLocalSpecParams((p) => ({ ...p, [field]: value }));
-  };
-
-  const handleSpecLiveChange = (field, value) => {
-    const updated = { ...localSpecParams, [field]: value };
-    setLocalSpecParams(updated);
-    onSpectrogramParamsChange?.(updated);
-  };
-
-  const handleSpecReset = () => {
-    setLocalSpecParams(DEFAULT_SPECTROGRAM_PARAMS);
-    onSpectrogramParamsChange?.(DEFAULT_SPECTROGRAM_PARAMS);
-  };
-
-  const handleSpecApply = () => {
-    onSpectrogramParamsChange?.(localSpecParams);
-  };
-
   return (
     <div className="sidebar">
       {/* ── Zone 1: Landmarks ── */}
@@ -209,14 +174,14 @@ const Sidebar = ({
             return (
               <li
                 key={name}
-                className={`trace-item ${name === activeTrace ? "active" : ""} ${
-                  isHidden ? "trace-hidden" : ""
-                }`}
+                className={`trace-item ${
+                  name === activeTrace ? "active" : ""
+                } ${isHidden ? "trace-hidden" : ""}`}
               >
-                {/* <span
+                <span
                   className="trace-dot"
                   style={{ background: traceColors[name] || "#6c7086" }}
-                /> */}
+                />
                 {renameTarget === name ? (
                   <input
                     className="trace-rename-input"
@@ -260,7 +225,9 @@ const Sidebar = ({
                   {isHidden ? "🚫" : "👁"}
                 </button>
                 <button
-                  className={`icon-btn ${name === defaultTraceName ? "active-star" : ""}`}
+                  className={`icon-btn ${
+                    name === defaultTraceName ? "active-star" : ""
+                  }`}
                   onClick={() => handleSetDefault(name)}
                   title="Set as default"
                 >
@@ -336,82 +303,6 @@ const Sidebar = ({
               ↓ Export CSV
             </button>
           </div>
-        </div>
-      </div>
-
-      {/* ── Zone 2: Spectrogram params ── */}
-      <div className="sidebar-zone zone-spectrogram">
-        <div className="sidebar-section-title">Spectrogram</div>
-        <div className="param-row">
-          <span className="param-label">Freq Max</span>
-          <input
-            className="param-input"
-            type="number"
-            value={localSpecParams.freq_max}
-            onChange={(e) =>
-              handleSpecChange("freq_max", parseFloat(e.target.value) || 0)
-            }
-            onKeyUp={(e) => {
-              if (e.key === "ArrowUp" || e.key === "ArrowDown")
-                handleSpecLiveChange(
-                  "freq_max",
-                  parseFloat(e.target.value) || 0,
-                );
-            }}
-            step="10"
-            min="0"
-          />
-        </div>
-        <div className="param-row">
-          <span className="param-label">Window</span>
-          <input
-            className="param-input"
-            type="number"
-            value={localSpecParams.window_length}
-            onChange={(e) =>
-              handleSpecChange(
-                "window_length",
-                parseFloat(e.target.value) || 0.001,
-              )
-            }
-            onKeyUp={(e) => {
-              if (e.key === "ArrowUp" || e.key === "ArrowDown")
-                handleSpecLiveChange(
-                  "window_length",
-                  parseFloat(e.target.value) || 0.001,
-                );
-            }}
-            step="0.001"
-            min="0.001"
-          />
-        </div>
-        <div className="param-row">
-          <span className="param-label">Dyn Range</span>
-          <input
-            className="param-input"
-            type="number"
-            value={localSpecParams.dynamic_range}
-            onChange={(e) =>
-              handleSpecChange("dynamic_range", parseFloat(e.target.value) || 0)
-            }
-            onKeyUp={(e) => {
-              if (e.key === "ArrowUp" || e.key === "ArrowDown")
-                handleSpecLiveChange(
-                  "dynamic_range",
-                  parseFloat(e.target.value) || 0,
-                );
-            }}
-            step="1"
-            min="0"
-          />
-        </div>
-        <div className="sidebar-btn-row">
-          <button className="sidebar-btn" onClick={handleSpecApply}>
-            Apply
-          </button>
-          <button className="sidebar-btn" onClick={handleSpecReset}>
-            Reset
-          </button>
         </div>
       </div>
 

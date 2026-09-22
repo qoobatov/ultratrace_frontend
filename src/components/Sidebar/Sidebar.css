@@ -389,3 +389,12 @@
   font-family: monospace;
   text-transform: lowercase;
 }
+select.param-input {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M0 0l5 6 5-6z' fill='%23cdd6f4'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 4px center;
+  padding-right: 18px;
+  cursor: pointer;
+}

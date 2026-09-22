@@ -15,6 +15,7 @@ import "./Timeline.css";
 
 const TG_ZOOM_FACTOR = 1.5;
 const WHEEL_ZOOM_FACTOR = 1.15;
+const DRAG_SELECT_THRESHOLD = 5;
 
 const getFrameAtTime = (time, frameTimes) => {
   if (!frameTimes || frameTimes.length === 0) return 1;
@@ -36,14 +37,24 @@ const formatTime = (sec) => {
 };
 
 const Timeline = forwardRef(
-  ({ frame, setFrame, frameTimes, spectrogramParams }, ref) => {
+  (
+    {
+      frame,
+      setFrame,
+      frameTimes,
+      spectrogramParams,
+      spectrogramPanelOpen,
+      onToggleSpectrogramPanel,
+    },
+    ref,
+  ) => {
     const [currentTime, setCurrentTime] = useState(0);
     const [duration, setDuration] = useState(0);
     const [isPlaying, setIsPlaying] = useState(false);
     const [viewStart, setViewStart] = useState(null);
     const [viewEnd, setViewEnd] = useState(null);
     const [selectedInterval, setSelectedInterval] = useState(null);
-    const [playMode, setPlayMode] = useState(null); // null | 'all' | 'selection'
+    const [dragSelection, setDragSelection] = useState(null);
 
     const audioRef = useRef(null);
     const overviewRef = useRef(null);
@@ -186,7 +197,7 @@ const Timeline = forwardRef(
       [frameTimes, setFrame],
     );
 
-    // ── Play selection ────────────────────────────────────────────────────
+    // ── Play / Pause (Praat-логика) ───────────────────────────────────────
     const stopSelection = useCallback(() => {
       if (stopCheckRef.current) {
         clearTimeout(stopCheckRef.current);
@@ -208,36 +219,27 @@ const Timeline = forwardRef(
       playingSelectionRef.current = true;
     }, []);
 
-    const handlePlaySelection = useCallback(() => {
+    const handlePlayPause = useCallback(() => {
+      if (!audioRef.current) return;
       const iv = selectedIntervalRef.current;
-      if (!iv) return;
-      if (playMode === "selection") {
-        stopSelection();
-        handleSeek(iv.start);
-        setPlayMode(null);
+
+      if (isPlaying) {
+        audioRef.current.pause();
         return;
       }
-      if (playMode === "all") {
-        audioRef.current?.pause();
+
+      // Praat-логика: выделение, если есть; иначе видимое окно.
+      if (iv) {
+        playInterval(iv, iv.start);
+        return;
       }
 
-      playInterval(iv, iv.start);
-      setPlayMode("selection");
-    }, [playMode, stopSelection, playInterval, handleSeek]);
-
-    const handlePlayAll = useCallback(() => {
-      if (!audioRef.current) return;
-      if (playMode === "all") {
-        audioRef.current.pause();
-        setPlayMode(null);
-      } else {
-        if (playMode === "selection") {
-          stopSelection();
-        }
-        audioRef.current.play();
-        setPlayMode("all");
-      }
-    }, [playMode, stopSelection]);
+      const s = effStartRef.current;
+      const e = effEndRef.current;
+      if (e <= s) return;
+      const url = getAudioSegmentUrl(s, e);
+      audioRef.current.playSegmentUrl(url, s);
+    }, [isPlaying, playInterval]);
 
     useEffect(() => {
       return () => {
@@ -251,7 +253,7 @@ const Timeline = forwardRef(
         const ctrl = e.ctrlKey || e.metaKey;
 
         if (ctrl && ["i", "o", "a", "b"].includes(e.key)) e.preventDefault();
-        if (e.key === " " && selectedIntervalRef.current) e.preventDefault();
+        if (e.key === " ") e.preventDefault();
 
         if (
           e.target.tagName === "INPUT" ||
@@ -264,7 +266,7 @@ const Timeline = forwardRef(
         if (ctrl && e.key === "o") zoomOut();
         if (ctrl && e.key === "a") zoomAll();
         if (ctrl && e.key === "b") zoomToSelection();
-        if (e.key === " ") handlePlaySelection();
+        if (e.key === " ") handlePlayPause();
 
         if (e.shiftKey && e.key === "ArrowLeft") {
           e.preventDefault();
@@ -302,7 +304,7 @@ const Timeline = forwardRef(
       zoomToSelection,
       panLeft,
       panRight,
-      handlePlaySelection,
+      handlePlayPause,
       handleSeek,
       frameTimes,
     ]);
@@ -338,32 +340,93 @@ const Timeline = forwardRef(
       };
     }, [zoomAtTime]);
 
-    // ── Click on spectrogram → nearest frame ──────────────────────────────
+    // ── Click + drag on spectrogram ───────────────────────────────────────
+    // Клик без движения — seek к ближайшему кадру.
+    // Drag — создаёт выделение (заменяет selectedInterval).
     useEffect(() => {
       const el = spectroRef.current;
       if (!el) return;
 
-      const handler = (e) => {
+      const dragStateRef = { current: null };
+
+      const getTimeAtClientX = (clientX) => {
         const rect = el.getBoundingClientRect();
-        if (rect.width <= 0) return;
+        if (rect.width <= 0) return null;
         const ratio = Math.max(
           0,
-          Math.min(1, (e.clientX - rect.left) / rect.width),
+          Math.min(1, (clientX - rect.left) / rect.width),
         );
         const s = effStartRef.current;
         const eT = effEndRef.current;
-        const time = s + ratio * (eT - s);
-        handleSeek(time);
+        return s + ratio * (eT - s);
       };
 
-      el.addEventListener("click", handler);
-      return () => el.removeEventListener("click", handler);
+      const handleDown = (e) => {
+        if (e.button !== 0) return;
+        const time = getTimeAtClientX(e.clientX);
+        if (time == null) return;
+        e.preventDefault();
+        dragStateRef.current = {
+          startX: e.clientX,
+          startTime: time,
+          moved: false,
+        };
+      };
+
+      const handleMove = (e) => {
+        const st = dragStateRef.current;
+        if (!st) return;
+        if (!st.moved) {
+          if (Math.abs(e.clientX - st.startX) < DRAG_SELECT_THRESHOLD) return;
+          st.moved = true;
+        }
+        const time = getTimeAtClientX(e.clientX);
+        if (time == null) return;
+        const [s, e2] =
+          time < st.startTime ? [time, st.startTime] : [st.startTime, time];
+        setDragSelection({ start: s, end: e2 });
+      };
+
+      const handleUp = (e) => {
+        const st = dragStateRef.current;
+        if (!st) return;
+        dragStateRef.current = null;
+
+        if (st.moved) {
+          const time = getTimeAtClientX(e.clientX);
+          if (time != null) {
+            const [s, e2] =
+              time < st.startTime ? [time, st.startTime] : [st.startTime, time];
+            setSelectedInterval({
+              start: s,
+              end: e2,
+              tier: null,
+              text: "",
+            });
+          }
+          setDragSelection(null);
+        } else {
+          const time = getTimeAtClientX(e.clientX);
+          if (time != null) handleSeek(time);
+        }
+
+        window.getSelection?.()?.removeAllRanges?.();
+      };
+
+      el.addEventListener("mousedown", handleDown);
+      window.addEventListener("mousemove", handleMove);
+      window.addEventListener("mouseup", handleUp);
+      return () => {
+        el.removeEventListener("mousedown", handleDown);
+        window.removeEventListener("mousemove", handleMove);
+        window.removeEventListener("mouseup", handleUp);
+      };
     }, [handleSeek]);
 
     const handleResetSelection = useCallback(() => {
       stopSelection();
       setSelectedInterval(null);
-      setPlayMode(null);
+      setDragSelection(null);
       handleSeek(0);
     }, [stopSelection, handleSeek]);
 
@@ -449,7 +512,6 @@ const Timeline = forwardRef(
             handleSeek(selectedIntervalRef.current.start);
           }
           playingSelectionRef.current = false;
-          setPlayMode(null);
         }
       },
       [handleSeek],
@@ -487,26 +549,17 @@ const Timeline = forwardRef(
           <div className="tl-divider" />
 
           <button
-            className="tl-btn tl-btn-icon"
-            onClick={handlePlayAll}
-            title={playMode === "all" ? "Pause (Space)" : "Play all"}
-          >
-            {playMode === "all" ? "⏸️ Pause all" : "▶️ Play all"}
-          </button>
-
-          <button
             className={`tl-btn${selectedInterval ? " active" : ""}`}
-            onClick={handlePlaySelection}
-            disabled={!selectedInterval}
+            onClick={handlePlayPause}
             title={
-              playMode === "selection"
-                ? "Pause selection (Space)"
-                : "Play selection (Space)"
+              isPlaying
+                ? "Pause (Space)"
+                : selectedInterval
+                  ? "Play selection (Space)"
+                  : "Play visible window (Space)"
             }
           >
-            {playMode === "selection"
-              ? "⏸️ Pause selection"
-              : "▶️ Play selection"}
+            {isPlaying ? "⏸️ Pause" : "▶️ Play"}
           </button>
 
           <button
@@ -515,6 +568,19 @@ const Timeline = forwardRef(
             title="Reset selection and position"
           >
             ↩️ Reset
+          </button>
+
+          <div className="tl-divider" />
+
+          <button
+            className={`tl-btn tl-btn-icon${spectrogramPanelOpen ? " active" : ""}`}
+            onClick={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              onToggleSpectrogramPanel?.(rect);
+            }}
+            title="Spectrogram settings"
+          >
+            ⚙️
           </button>
 
           <div className="tl-divider" />
@@ -532,7 +598,7 @@ const Timeline = forwardRef(
             spectrogramParams={spectrogramParams}
             viewStart={effStart}
             viewEnd={effEnd}
-            selectedInterval={selectedInterval}
+            selectedInterval={dragSelection || selectedInterval}
           />
         </div>
 
@@ -543,10 +609,6 @@ const Timeline = forwardRef(
           onDurationLoaded={setDuration}
           onPlayStateChange={handlePlayStateChange}
           onStop={handleStop}
-          onPlay={() => {
-            const iv = selectedIntervalRef.current;
-            if (iv) playInterval(iv);
-          }}
         />
 
         {/* ── TimelineBar ── */}

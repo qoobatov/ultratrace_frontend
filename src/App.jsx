@@ -3,6 +3,7 @@ import FrameCanvas from "./components/FrameViewer/FrameCanvas";
 import Sidebar from "./components/Sidebar/Sidebar";
 import Timeline from "./components/Timeline/Timeline";
 import Header from "./components/Header/Header";
+import SpectrogramPanel from "./components/SpectrogramPanel/SpectrogramPanel";
 import {
   getTraces,
   getFrameTimes,
@@ -35,11 +36,28 @@ function App() {
     freq_max: 5000,
     window_length: 0.005,
     dynamic_range: 90,
+    colormap: "grayscale",
+    threshold: 0,
   });
   const [offset, setOffset] = useState(0);
   const [studyVersion, setStudyVersion] = useState(0);
+  const [spectrogramPanel, setSpectrogramPanel] = useState({
+    open: false,
+    anchor: null,
+  });
 
   const timelineRef = useRef(null);
+
+  const toggleSpectrogramPanel = useCallback((anchorRect) => {
+    setSpectrogramPanel((p) => ({
+      open: !p.open,
+      anchor: anchorRect ?? p.anchor,
+    }));
+  }, []);
+
+  const closeSpectrogramPanel = useCallback(() => {
+    setSpectrogramPanel((p) => ({ ...p, open: false }));
+  }, []);
 
   const setFrameAndSync = useCallback((newFrame) => {
     const fn = typeof newFrame === "function" ? newFrame : () => newFrame;
@@ -167,8 +185,6 @@ function App() {
           onToggleTraceVisibility={toggleTraceVisibility}
           onTracesUpdate={refreshTraces}
           frameNumber={frame}
-          spectrogramParams={spectrogramParams}
-          onSpectrogramParamsChange={setSpectrogramParams}
           offset={offset}
           onOffsetApply={handleOffsetApply}
         />
@@ -191,9 +207,18 @@ function App() {
             setFrame={setFrameAndSync}
             frameTimes={frameTimes}
             spectrogramParams={spectrogramParams}
+            spectrogramPanelOpen={spectrogramPanel.open}
+            onToggleSpectrogramPanel={toggleSpectrogramPanel}
           />
         </main>
       </div>
+      <SpectrogramPanel
+        open={spectrogramPanel.open}
+        anchor={spectrogramPanel.anchor}
+        onClose={closeSpectrogramPanel}
+        spectrogramParams={spectrogramParams}
+        onSpectrogramParamsChange={setSpectrogramParams}
+      />
     </div>
   );
 }

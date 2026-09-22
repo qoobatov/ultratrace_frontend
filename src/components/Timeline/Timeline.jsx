@@ -14,6 +14,7 @@ import { getAudioSegmentUrl } from "../../api/client";
 import "./Timeline.css";
 
 const TG_ZOOM_FACTOR = 1.5;
+const WHEEL_ZOOM_FACTOR = 1.15;
 
 const getFrameAtTime = (time, frameTimes) => {
   if (!frameTimes || frameTimes.length === 0) return 1;
@@ -46,6 +47,8 @@ const Timeline = forwardRef(
 
     const audioRef = useRef(null);
     const overviewRef = useRef(null);
+    const spectroRef = useRef(null);
+    const tiersRef = useRef(null);
     const currentFrameRef = useRef(frame);
     const playingSelectionRef = useRef(false);
     const stopCheckRef = useRef(null);
@@ -105,6 +108,24 @@ const Timeline = forwardRef(
       setViewStart(ns);
       setViewEnd(ne);
     }, [clampView]);
+
+    // Зум в конкретную точку — сохраняет позицию курсора на месте
+    const zoomAtTime = useCallback(
+      (time, factor) => {
+        const s = effStartRef.current;
+        const e = effEndRef.current;
+        const a = e - s;
+        if (a <= 0) return;
+        const newA = a / factor;
+        const ratio = (time - s) / a;
+        let ns = time - ratio * newA;
+        let ne = ns + newA;
+        [ns, ne] = clampView(ns, ne);
+        setViewStart(ns);
+        setViewEnd(ne);
+      },
+      [clampView],
+    );
 
     const zoomAll = useCallback(() => {
       setViewStart(null);
@@ -224,7 +245,7 @@ const Timeline = forwardRef(
       };
     }, []);
 
-    // ── Клавиатура — стабильные зависимости ──────────────────────────────
+    // ── Клавиатура ────────────────────────────────────────────────────────
     useEffect(() => {
       const onKeyDown = (e) => {
         const ctrl = e.ctrlKey || e.metaKey;
@@ -253,11 +274,27 @@ const Timeline = forwardRef(
           e.preventDefault();
           panRight();
         }
+
+        // ←/→: предыдущий / следующий кадр
+        if (
+          !e.shiftKey &&
+          !ctrl &&
+          (e.key === "ArrowLeft" || e.key === "ArrowRight")
+        ) {
+          e.preventDefault();
+          if (!frameTimes?.length) return;
+          const dir = e.key === "ArrowLeft" ? -1 : 1;
+          const nextFrame = Math.max(
+            1,
+            Math.min(frameTimes.length, currentFrameRef.current + dir),
+          );
+          const time = frameTimes[nextFrame - 1];
+          if (time != null) handleSeek(time);
+        }
       };
 
       window.addEventListener("keydown", onKeyDown);
       return () => window.removeEventListener("keydown", onKeyDown);
-      // Все функции стабильны — зависят только от clampView который не меняется
     }, [
       zoomIn,
       zoomOut,
@@ -266,7 +303,62 @@ const Timeline = forwardRef(
       panLeft,
       panRight,
       handlePlaySelection,
+      handleSeek,
+      frameTimes,
     ]);
+
+    // ── Ctrl+wheel zoom на спектрограмме и тирах ──────────────────────────
+    useEffect(() => {
+      const handler = (e) => {
+        if (!(e.ctrlKey || e.metaKey)) return;
+        e.preventDefault();
+
+        const el = e.currentTarget;
+        const rect = el.getBoundingClientRect();
+        if (rect.width <= 0) return;
+
+        const ratio = Math.max(
+          0,
+          Math.min(1, (e.clientX - rect.left) / rect.width),
+        );
+        const s = effStartRef.current;
+        const eT = effEndRef.current;
+        const time = s + ratio * (eT - s);
+
+        const factor = e.deltaY < 0 ? WHEEL_ZOOM_FACTOR : 1 / WHEEL_ZOOM_FACTOR;
+        zoomAtTime(time, factor);
+      };
+
+      const els = [spectroRef.current, tiersRef.current].filter(Boolean);
+      els.forEach((el) =>
+        el.addEventListener("wheel", handler, { passive: false }),
+      );
+      return () => {
+        els.forEach((el) => el.removeEventListener("wheel", handler));
+      };
+    }, [zoomAtTime]);
+
+    // ── Click on spectrogram → nearest frame ──────────────────────────────
+    useEffect(() => {
+      const el = spectroRef.current;
+      if (!el) return;
+
+      const handler = (e) => {
+        const rect = el.getBoundingClientRect();
+        if (rect.width <= 0) return;
+        const ratio = Math.max(
+          0,
+          Math.min(1, (e.clientX - rect.left) / rect.width),
+        );
+        const s = effStartRef.current;
+        const eT = effEndRef.current;
+        const time = s + ratio * (eT - s);
+        handleSeek(time);
+      };
+
+      el.addEventListener("click", handler);
+      return () => el.removeEventListener("click", handler);
+    }, [handleSeek]);
 
     const handleResetSelection = useCallback(() => {
       stopSelection();
@@ -433,7 +525,7 @@ const Timeline = forwardRef(
         </div>
 
         {/* ── Spectrogram ── */}
-        <div className="timeline-spectrogram">
+        <div className="timeline-spectrogram" ref={spectroRef}>
           <SpectrogramView
             duration={duration}
             currentTime={currentTime}
@@ -470,7 +562,7 @@ const Timeline = forwardRef(
         />
 
         {/* ── TextGrid tiers ── */}
-        <div className="timeline-tiers">
+        <div className="timeline-tiers" ref={tiersRef}>
           <TextGridTiers
             currentTime={currentTime}
             duration={duration}

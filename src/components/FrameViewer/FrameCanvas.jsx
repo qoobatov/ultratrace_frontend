@@ -21,7 +21,6 @@ const CLICK_DIST_THRESHOLD = 3;
 const SELECTED_COLOR = "cyan";
 const DEFAULT_STAGE_SIZE = { width: 730, height: 530 };
 
-// --- Reducer для undo/redo истории ---
 const historyReducer = (state, action) => {
   switch (action.type) {
     case "PUSH": {
@@ -50,25 +49,28 @@ const historyReducer = (state, action) => {
 const FrameCanvas = ({
   frameNumber,
   activeTrace,
-  traceColor,
+  traces = [],
+  traceColors = {},
+  hiddenTraces = new Set(),
   pointsVersion,
   studyVersion,
   onPointsSaved,
 }) => {
-  // ---------- состояние ----------
+  // ---------- активный трейс: редактируемый ----------
   const [image, setImage] = useState(null);
 
-  // История хранится централизованно; points – производное значение
   const [historyState, dispatch] = useReducer(historyReducer, {
     entries: [{ points: [] }],
     index: 0,
   });
   const points = historyState.entries[historyState.index]?.points ?? [];
-  // ref для актуального массива точек (избегаем устаревших замыканий)
   const pointsRef = useRef(points);
   useEffect(() => {
     pointsRef.current = points;
   }, [points]);
+
+  // ---------- остальные трейсы: read-only ----------
+  const [otherTracePoints, setOtherTracePoints] = useState({});
 
   const [selectedIndices, setSelectedIndices] = useState(new Set());
   const [selectionFrozen, setSelectionFrozen] = useState(false);
@@ -80,8 +82,7 @@ const FrameCanvas = ({
   const isSpaceDown = useRef(false);
   const clipboardRef = useRef(null);
 
-  // Защита от лишней перезагрузки данных после локального сохранения
-  const lastSavedContext = useRef(null); // { activeTrace, frameNumber }
+  const lastSavedContext = useRef(null);
 
   const [stageSize, setStageSize] = useState(DEFAULT_STAGE_SIZE);
   const [stageScale, setStageScale] = useState(1);
@@ -97,8 +98,10 @@ const FrameCanvas = ({
   const gestureStarted = useRef(false);
   const pointDragged = useRef(false);
 
-  // Буфер для точек, нарисованных за одно непрерывное движение мыши
   const drawBufferRef = useRef([]);
+
+  const activeColor = traceColors[activeTrace] || "red";
+  const isActiveVisible = !!activeTrace && !hiddenTraces.has(activeTrace);
 
   // --- Responsive stage ---
   useEffect(() => {
@@ -121,7 +124,6 @@ const FrameCanvas = ({
     return () => observer.disconnect();
   }, []);
 
-  // Сброс контекста сохранения при размонтировании
   useEffect(() => {
     return () => {
       lastSavedContext.current = null;
@@ -130,14 +132,13 @@ const FrameCanvas = ({
 
   // ----- AUTO_TRACE -----
   const handleAutoTrace = async () => {
-    if (!activeTrace || !frameNumber) return;
+    if (!activeTrace || !frameNumber || !isActiveVisible) return;
     try {
       const pts = await autoTraceFrame(activeTrace, frameNumber);
       dispatch({ type: "RESET", payload: pts || [] });
       setSelectedIndices(new Set());
       setSelectionFrozen(false);
       lastSavedContext.current = { activeTrace, frameNumber };
-      // точки уже на сервере после auto‑трейса, но для единообразия вызовем onPointsSaved
       onPointsSaved?.();
     } catch (err) {
       console.error("Auto-trace failed", err);
@@ -178,42 +179,60 @@ const FrameCanvas = ({
     };
   }, [frameNumber, loadImage, studyVersion]);
 
-  // --- Загрузка точек с сервера ---
+  // --- Загрузка точек для всех трейсов ---
+  // Активный идёт в history, остальные — в otherTracePoints.
   useEffect(() => {
-    if (!activeTrace || !frameNumber) return;
+    if (!frameNumber || traces.length === 0) return;
 
-    // Если мы только что сами сохранили точки для этого же кадра/трассы,
-    // нет смысла перезатирать историю серверными данными.
-    if (
+    // Не перезагружаем активный, если мы сами только что его сохранили
+    const skipActive =
       lastSavedContext.current &&
       lastSavedContext.current.activeTrace === activeTrace &&
-      lastSavedContext.current.frameNumber === frameNumber
-    ) {
-      lastSavedContext.current = null;
-      return;
-    }
+      lastSavedContext.current.frameNumber === frameNumber;
+    if (skipActive) lastSavedContext.current = null;
 
-    const fetchPoints = async () => {
-      try {
-        const pts = await getPoints(activeTrace, frameNumber);
-        dispatch({ type: "RESET", payload: pts || [] });
-        setSelectedIndices(new Set());
-        setSelectionFrozen(false);
-      } catch (err) {
-        console.error("Failed to fetch points", err);
-        dispatch({ type: "RESET", payload: [] });
-      }
+    let cancelled = false;
+
+    const fetchAll = async () => {
+      const results = await Promise.all(
+        traces.map(async (name) => {
+          try {
+            const pts = await getPoints(name, frameNumber);
+            return { name, points: pts || [] };
+          } catch (err) {
+            console.error(`Failed to fetch points for "${name}"`, err);
+            return { name, points: [] };
+          }
+        }),
+      );
+      if (cancelled) return;
+
+      const others = {};
+      results.forEach(({ name, points: pts }) => {
+        if (name === activeTrace) {
+          if (!skipActive) {
+            dispatch({ type: "RESET", payload: pts });
+            setSelectedIndices(new Set());
+            setSelectionFrozen(false);
+          }
+        } else {
+          others[name] = pts;
+        }
+      });
+      setOtherTracePoints(others);
     };
-    fetchPoints();
-  }, [activeTrace, frameNumber, pointsVersion]);
 
-  // --- Вспомогательные функции ---
-  // Установка флага, что мы только что сохранили данные локально
+    fetchAll();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTrace, frameNumber, pointsVersion, traces]);
+
+  // --- Helpers ---
   const markLocalSave = () => {
     lastSavedContext.current = { activeTrace, frameNumber };
   };
 
-  // Сохранение на сервер с вызовом колбэка
   const persistPoints = useCallback(
     async (newPoints) => {
       if (!activeTrace || !frameNumber) return;
@@ -227,8 +246,6 @@ const FrameCanvas = ({
     [activeTrace, frameNumber, onPointsSaved],
   );
 
-  // Вместо сложного эффекта, мы оставим явные вызовы savePoints внутри undo/redo,
-  // но для этого нужно иметь актуальный historyState. Мы можем сохранять его в реф.
   const historyStateRef = useRef(historyState);
   useEffect(() => {
     historyStateRef.current = historyState;
@@ -266,11 +283,11 @@ const FrameCanvas = ({
         e.preventDefault();
       }
 
-      // Удаление
       if (
         (e.key === "Delete" || e.key === "Backspace") &&
         selectedIndices.size > 0 &&
-        activeTrace
+        activeTrace &&
+        isActiveVisible
       ) {
         const currentPoints = pointsRef.current;
         const newPoints = currentPoints.filter(
@@ -283,14 +300,12 @@ const FrameCanvas = ({
         persistPoints(newPoints);
       }
 
-      // Отмена / повтор
       if ((e.ctrlKey || e.metaKey) && e.key === "z") {
         e.preventDefault();
         if (e.shiftKey) redoWithSave();
         else undoWithSave();
       }
 
-      // Копировать
       if ((e.ctrlKey || e.metaKey) && e.key === "c") {
         if (selectedIndices.size > 0) {
           const currentPoints = pointsRef.current;
@@ -304,12 +319,12 @@ const FrameCanvas = ({
         }
       }
 
-      // Вставить
       if ((e.ctrlKey || e.metaKey) && e.key === "v") {
         if (
           clipboardRef.current &&
           clipboardRef.current.length > 0 &&
-          activeTrace
+          activeTrace &&
+          isActiveVisible
         ) {
           const currentPoints = pointsRef.current;
           const newPoints = [...currentPoints, ...clipboardRef.current];
@@ -338,8 +353,7 @@ const FrameCanvas = ({
     activeTrace,
     frameNumber,
     persistPoints,
-    undoWithSave,
-    redoWithSave,
+    isActiveVisible,
   ]);
 
   // --- Координаты ---
@@ -361,7 +375,6 @@ const FrameCanvas = ({
     [image],
   );
 
-  // Проверка, не находится ли указатель над существующей точкой
   const isOverPoint = useCallback(
     (pointerPos) => {
       const stage = stageRef.current;
@@ -382,10 +395,9 @@ const FrameCanvas = ({
     [image],
   );
 
-  // Добавление одной точки (для клика) – используется и в одиночных кликах
   const addSinglePoint = useCallback(
     (pointerPos) => {
-      if (!activeTrace || !image) return;
+      if (!activeTrace || !image || !isActiveVisible) return;
       const rel = getRelativeCoords(pointerPos);
       if (!rel) return;
       const stage = stageRef.current;
@@ -406,7 +418,7 @@ const FrameCanvas = ({
       markLocalSave();
       persistPoints(newPoints);
     },
-    [activeTrace, image, getRelativeCoords, persistPoints],
+    [activeTrace, image, getRelativeCoords, persistPoints, isActiveVisible],
   );
 
   // --- Stage mouse handlers ---
@@ -417,8 +429,8 @@ const FrameCanvas = ({
 
     mouseDownPos.current = { x: pointerPos.x, y: pointerPos.y };
     gestureStarted.current = false;
-    drawBufferRef.current = []; // сброс буфера рисования
-    setDraftPoints([]); // <-- очищаем визуальный черновик
+    drawBufferRef.current = [];
+    setDraftPoints([]);
   }, [isOverPoint]);
 
   const handleStageMouseMove = useCallback(
@@ -433,7 +445,7 @@ const FrameCanvas = ({
       gestureStarted.current = true;
 
       const shouldPan = isSpaceDown.current;
-      const shouldSelect = !shouldPan && e.evt.shiftKey; // ← из события, не из рефа
+      const shouldSelect = !shouldPan && e.evt.shiftKey;
 
       if (shouldPan) {
         if (!isPanning) {
@@ -454,14 +466,13 @@ const FrameCanvas = ({
           x2: pointerPos.x,
           y2: pointerPos.y,
         });
-      } else if (activeTrace) {
-        // Режим рисования: добавляем точки в буфер
+      } else if (activeTrace && isActiveVisible) {
         const rel = getRelativeCoords(pointerPos);
         if (!rel) return;
-        const stage = stageRef.current;
+        const stage2 = stageRef.current;
         const baseScale = Math.min(
-          stage.width() / image.width,
-          stage.height() / image.height,
+          stage2.width() / image.width,
+          stage2.height() / image.height,
         );
         const minDistRel = 16 / (image.width * baseScale);
         const currentPoints = pointsRef.current;
@@ -474,7 +485,7 @@ const FrameCanvas = ({
         setDraftPoints([...drawBufferRef.current]);
       }
     },
-    [isPanning, activeTrace, getRelativeCoords, image],
+    [isPanning, activeTrace, getRelativeCoords, image, isActiveVisible],
   );
 
   const handleStageMouseUp = useCallback(() => {
@@ -525,7 +536,6 @@ const FrameCanvas = ({
       return;
     }
 
-    // Если был жест рисования – применим накопленные точки
     if (gestureStarted.current && drawBufferRef.current.length > 0) {
       const currentPoints = pointsRef.current;
       const newPoints = [...currentPoints, ...drawBufferRef.current];
@@ -537,7 +547,6 @@ const FrameCanvas = ({
       drawBufferRef.current = [];
       setDraftPoints([]);
     } else if (!gestureStarted.current && mouseDownPos.current) {
-      // Одиночный клик без перетаскивания
       setSelectedIndices(new Set());
       setSelectionFrozen(false);
       addSinglePoint(stageRef.current.getPointerPosition());
@@ -552,7 +561,7 @@ const FrameCanvas = ({
     persistPoints,
   ]);
 
-  // --- Обработчики точек (существующие) ---
+  // --- Точки активного трейса ---
   const handlePointClick = useCallback((index, e) => {
     if (pointDragged.current) {
       pointDragged.current = false;
@@ -674,7 +683,6 @@ const FrameCanvas = ({
         );
       }
 
-      // Перемещаем группы визуально
       const layer = stage.findOne("Layer");
       if (layer) {
         layer.find("Group").forEach((g) => {
@@ -688,7 +696,6 @@ const FrameCanvas = ({
         });
       }
 
-      // Сохраняем только если координаты реально изменились
       if (JSON.stringify(newPoints) !== JSON.stringify(currentPoints)) {
         dispatch({ type: "PUSH", payload: newPoints });
         markLocalSave();
@@ -729,7 +736,6 @@ const FrameCanvas = ({
     stageSize.width / image.width,
     stageSize.height / image.height,
   );
-  const color = traceColor || "red";
 
   const selRectStyle = selectionRect
     ? {
@@ -827,67 +833,106 @@ const FrameCanvas = ({
               width={image.width * baseScale}
               height={image.height * baseScale}
             />
-            {points.map((point, i) => {
-              const cx = point.x * image.width * baseScale;
-              const cy = point.y * image.height * baseScale;
-              const isSelected = selectedIndices.has(i);
-              const ptColor = isSelected
-                ? selectionFrozen
-                  ? SELECTED_COLOR
-                  : "yellow"
-                : color;
-              const size = 7;
-              return (
-                <Group
-                  key={i}
-                  x={cx}
-                  y={cy}
-                  draggable
-                  onDragStart={(e) => handlePointDragStart(i, e)}
-                  onDragMove={(e) => handlePointDragMove(i, e)}
-                  onDragEnd={(e) => handlePointDragEnd(i, e)}
-                  onClick={(e) => handlePointClick(i, e)}
-                  onTap={(e) => handlePointClick(i, e)}
-                  data-index={i}
-                >
-                  <Line
-                    points={[-size, 0, size, 0]}
-                    stroke={ptColor}
-                    strokeWidth={1.5}
+
+            {/* ── Неактивные видимые трейсы (read-only) ── */}
+            {traces.map((name) => {
+              if (name === activeTrace) return null;
+              if (hiddenTraces.has(name)) return null;
+              const pts = otherTracePoints[name] || [];
+              const c = traceColors[name] || "#6c7086";
+              const size = 6;
+              return pts.map((point, i) => {
+                const cx = point.x * image.width * baseScale;
+                const cy = point.y * image.height * baseScale;
+                return (
+                  <Group
+                    key={`other-${name}-${i}`}
+                    x={cx}
+                    y={cy}
                     listening={false}
-                  />
-                  <Line
-                    points={[0, -size, 0, size]}
-                    stroke={ptColor}
-                    strokeWidth={1.5}
-                    listening={false}
-                  />
-                  <Circle radius={10} fill="transparent" />
-                </Group>
-              );
+                  >
+                    <Line
+                      points={[-size, 0, size, 0]}
+                      stroke={c}
+                      strokeWidth={1.2}
+                      opacity={0.85}
+                    />
+                    <Line
+                      points={[0, -size, 0, size]}
+                      stroke={c}
+                      strokeWidth={1.2}
+                      opacity={0.85}
+                    />
+                  </Group>
+                );
+              });
             })}
-            {/* НОВОЕ: черновые точки, которые видны во время drag-рисования */}
-            {draftPoints.map((point, idx) => {
-              const cx = point.x * image.width * baseScale;
-              const cy = point.y * image.height * baseScale;
-              const size = 7;
-              return (
-                <Group key={`draft-${idx}`} x={cx} y={cy}>
-                  <Line
-                    points={[-size, 0, size, 0]}
-                    stroke={color}
-                    strokeWidth={1.5}
-                    listening={false}
-                  />
-                  <Line
-                    points={[0, -size, 0, size]}
-                    stroke={color}
-                    strokeWidth={1.5}
-                    listening={false}
-                  />
-                </Group>
-              );
-            })}
+
+            {/* ── Активный трейс (редактируемый) ── */}
+            {isActiveVisible &&
+              points.map((point, i) => {
+                const cx = point.x * image.width * baseScale;
+                const cy = point.y * image.height * baseScale;
+                const isSelected = selectedIndices.has(i);
+                const ptColor = isSelected
+                  ? selectionFrozen
+                    ? SELECTED_COLOR
+                    : "yellow"
+                  : activeColor;
+                const size = 7;
+                return (
+                  <Group
+                    key={i}
+                    x={cx}
+                    y={cy}
+                    draggable
+                    onDragStart={(e) => handlePointDragStart(i, e)}
+                    onDragMove={(e) => handlePointDragMove(i, e)}
+                    onDragEnd={(e) => handlePointDragEnd(i, e)}
+                    onClick={(e) => handlePointClick(i, e)}
+                    onTap={(e) => handlePointClick(i, e)}
+                    data-index={i}
+                  >
+                    <Line
+                      points={[-size, 0, size, 0]}
+                      stroke={ptColor}
+                      strokeWidth={1.5}
+                      listening={false}
+                    />
+                    <Line
+                      points={[0, -size, 0, size]}
+                      stroke={ptColor}
+                      strokeWidth={1.5}
+                      listening={false}
+                    />
+                    <Circle radius={10} fill="transparent" />
+                  </Group>
+                );
+              })}
+
+            {/* ── Черновые точки во время drag-рисования ── */}
+            {isActiveVisible &&
+              draftPoints.map((point, idx) => {
+                const cx = point.x * image.width * baseScale;
+                const cy = point.y * image.height * baseScale;
+                const size = 7;
+                return (
+                  <Group key={`draft-${idx}`} x={cx} y={cy}>
+                    <Line
+                      points={[-size, 0, size, 0]}
+                      stroke={activeColor}
+                      strokeWidth={1.5}
+                      listening={false}
+                    />
+                    <Line
+                      points={[0, -size, 0, size]}
+                      stroke={activeColor}
+                      strokeWidth={1.5}
+                      listening={false}
+                    />
+                  </Group>
+                );
+              })}
           </Layer>
         </Stage>
         {selRectStyle && <div style={selRectStyle} />}

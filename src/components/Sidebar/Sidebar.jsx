@@ -1,6 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
-  getTraces,
   createTrace,
   renameTrace,
   deleteTrace,
@@ -12,6 +11,7 @@ import {
   getFrameTimes,
   exportContours,
 } from "../../api/client";
+import { HexColorPicker } from "react-colorful";
 import "./Sidebar.css";
 
 const DEFAULT_SPECTROGRAM_PARAMS = {
@@ -25,6 +25,11 @@ const DISPLAY_TIERS = ["sentence", "word", "orthographic vowel"];
 const Sidebar = ({
   activeTrace,
   onSelectTrace,
+  traces,
+  traceColors,
+  defaultTraceName,
+  hiddenTraces,
+  onToggleTraceVisibility,
   onTracesUpdate,
   frameNumber,
   spectrogramParams,
@@ -32,14 +37,11 @@ const Sidebar = ({
   offset,
   onOffsetApply,
 }) => {
-  const [traces, setTraces] = useState([]);
-  const [traceColors, setTraceColors] = useState({});
   const [newName, setNewName] = useState("");
   const [renameTarget, setRenameTarget] = useState(null);
   const [renameValue, setRenameValue] = useState("");
   const [colorPickerVisible, setColorPickerVisible] = useState(null);
-  const [initialized, setInitialized] = useState(false);
-  const [defaultTraceName, setDefaultTraceName] = useState(null);
+  const [pendingColor, setPendingColor] = useState("#ffffff");
   const [localSpecParams, setLocalSpecParams] = useState(
     spectrogramParams || DEFAULT_SPECTROGRAM_PARAMS,
   );
@@ -98,49 +100,30 @@ const Sidebar = ({
     setLocalOffset(offset);
   }, [offset]);
 
-  const fetchTraces = useCallback(async () => {
-    try {
-      const data = await getTraces();
-      const traceList = data.traces || [];
-      setTraces(traceList);
-      setTraceColors(data.colors || {});
-      setDefaultTraceName(data.default || null);
-      if (!initialized) {
-        const defaultTrace = data.default || traceList[0];
-        if (defaultTrace && !activeTrace) onSelectTrace(defaultTrace);
-        setInitialized(true);
-      }
-    } catch (err) {
-      console.error("Failed to fetch traces", err);
-    }
-  }, [activeTrace, onSelectTrace, initialized]);
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchTraces();
-  }, []);
-
   const handleCreate = async () => {
     if (!newName.trim()) return;
     try {
       await createTrace(newName.trim());
       setNewName("");
-      await fetchTraces();
-      onTracesUpdate?.();
+      await onTracesUpdate?.();
     } catch (err) {
       console.error("Failed to create trace", err);
     }
   };
 
   const handleRename = async (oldName) => {
-    if (!renameValue.trim()) return;
-    try {
-      await renameTrace(oldName, renameValue.trim());
+    const next = renameValue.trim();
+    if (!next || next === oldName) {
       setRenameTarget(null);
       setRenameValue("");
-      await fetchTraces();
-      if (activeTrace === oldName) onSelectTrace(renameValue.trim());
-      onTracesUpdate?.();
+      return;
+    }
+    try {
+      await renameTrace(oldName, next);
+      setRenameTarget(null);
+      setRenameValue("");
+      await onTracesUpdate?.();
+      if (activeTrace === oldName) onSelectTrace(next);
     } catch (err) {
       console.error("Failed to rename trace", err);
     }
@@ -150,9 +133,7 @@ const Sidebar = ({
     if (!window.confirm(`Delete trace "${name}"?`)) return;
     try {
       await deleteTrace(name);
-      await fetchTraces();
-      if (activeTrace === name) onSelectTrace(null);
-      onTracesUpdate?.();
+      await onTracesUpdate?.();
     } catch (err) {
       console.error("Failed to delete trace", err);
     }
@@ -162,18 +143,21 @@ const Sidebar = ({
     try {
       await setTraceColor(name, color);
       setColorPickerVisible(null);
-      await fetchTraces();
-      onTracesUpdate?.();
+      await onTracesUpdate?.();
     } catch (err) {
       console.error("Failed to set color", err);
     }
   };
 
+  const openColorPicker = (name) => {
+    setColorPickerVisible(name);
+    setPendingColor(traceColors[name] || "#ffffff");
+  };
+
   const handleSetDefault = async (name) => {
     try {
       await setDefaultTrace(name);
-      await fetchTraces();
-      onTracesUpdate?.();
+      await onTracesUpdate?.();
     } catch (err) {
       console.error("Failed to set default trace", err);
     }
@@ -220,80 +204,96 @@ const Sidebar = ({
       <div className="sidebar-zone zone-landmarks">
         <div className="sidebar-section-title">Landmarks</div>
         <ul className="trace-list">
-          {traces.map((name) => (
-            <li
-              key={name}
-              className={`trace-item ${name === activeTrace ? "active" : ""}`}
-            >
-              <span
-                className="trace-dot"
-                style={{ background: traceColors[name] || "#6c7086" }}
-              />
-              {renameTarget === name ? (
-                <input
-                  className="trace-rename-input"
-                  value={renameValue}
-                  onChange={(e) => setRenameValue(e.target.value)}
-                  onBlur={() => {
-                    if (cancelRef.current) {
-                      cancelRef.current = false;
-                      setRenameTarget(null);
-                      return;
-                    }
-                    handleRename(name);
+          {traces.map((name) => {
+            const isHidden = hiddenTraces?.has(name);
+            return (
+              <li
+                key={name}
+                className={`trace-item ${name === activeTrace ? "active" : ""} ${
+                  isHidden ? "trace-hidden" : ""
+                }`}
+              >
+                {/* <span
+                  className="trace-dot"
+                  style={{ background: traceColors[name] || "#6c7086" }}
+                /> */}
+                {renameTarget === name ? (
+                  <input
+                    className="trace-rename-input"
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    onBlur={() => {
+                      if (cancelRef.current) {
+                        cancelRef.current = false;
+                        setRenameTarget(null);
+                        return;
+                      }
+                      handleRename(name);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.target.blur();
+                      }
+                      if (e.key === "Escape") {
+                        cancelRef.current = true;
+                        e.target.blur();
+                      }
+                    }}
+                    autoFocus
+                  />
+                ) : (
+                  <span
+                    className="trace-name"
+                    onClick={() => onSelectTrace(name)}
+                  >
+                    {name}
+                  </span>
+                )}
+                <button
+                  className={`icon-btn ${isHidden ? "hidden-trace" : ""}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleTraceVisibility?.(name);
                   }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.target.blur(); // сохранит через onBlur выше
-                    }
-                    if (e.key === "Escape") {
-                      cancelRef.current = true;
-                      e.target.blur(); // отменит, не сохраняя
-                    }
-                  }}
-                  autoFocus
-                />
-              ) : (
-                <span
-                  className="trace-name"
-                  onClick={() => onSelectTrace(name)}
+                  title={isHidden ? "Show trace" : "Hide trace"}
                 >
-                  {name}
-                </span>
-              )}
-              <button
-                className={`icon-btn ${name === defaultTraceName ? "active-star" : ""}`}
-                onClick={() => handleSetDefault(name)}
-                title="Set as default"
-              >
-                ★
-              </button>
-              <button
-                className="icon-btn"
-                onClick={() => {
-                  setRenameTarget(name);
-                  setRenameValue(name);
-                }}
-                title="Rename"
-              >
-                ✎
-              </button>
-              <button
-                className="icon-btn"
-                onClick={() => setColorPickerVisible(name)}
-                title="Change color"
-              >
-                ◉
-              </button>
-              <button
-                className="icon-btn"
-                onClick={() => handleDelete(name)}
-                title="Delete"
-              >
-                ✕
-              </button>
-            </li>
-          ))}
+                  {isHidden ? "🚫" : "👁"}
+                </button>
+                <button
+                  className={`icon-btn ${name === defaultTraceName ? "active-star" : ""}`}
+                  onClick={() => handleSetDefault(name)}
+                  title="Set as default"
+                >
+                  ★
+                </button>
+                <button
+                  className="icon-btn"
+                  onClick={() => {
+                    setRenameTarget(name);
+                    setRenameValue(name);
+                  }}
+                  title="Rename"
+                >
+                  ✎
+                </button>
+                <button
+                  className="icon-btn"
+                  onClick={() => openColorPicker(name)}
+                  title="Change color"
+                  style={{ color: traceColors[name] || "#6c7086" }}
+                >
+                  ◉
+                </button>
+                <button
+                  className="icon-btn"
+                  onClick={() => handleDelete(name)}
+                  title="Delete"
+                >
+                  ✕
+                </button>
+              </li>
+            );
+          })}
         </ul>
         <div className="add-trace-row">
           <input
@@ -415,9 +415,9 @@ const Sidebar = ({
         </div>
       </div>
 
-      {/* ── Zone 3: Annotations ── */}
+      {/* ── Zone 3: Tiers ── */}
       <div className="sidebar-zone zone-annotations">
-        <div className="sidebar-section-title">Annotations</div>
+        <div className="sidebar-section-title">Tiers</div>
         {DISPLAY_TIERS.map((tierName) => {
           const intervals = tierIntervals[tierName] || [];
           const idx = currentIndices[tierName] ?? -1;
@@ -466,19 +466,38 @@ const Sidebar = ({
             <div className="color-picker-title">
               Color for "{colorPickerVisible}"
             </div>
-            <input
-              type="color"
-              defaultValue={traceColors[colorPickerVisible] || "#ffffff"}
-              onChange={(e) =>
-                handleColorChange(colorPickerVisible, e.target.value)
-              }
-            />
-            <button
-              className="sidebar-btn"
-              onClick={() => setColorPickerVisible(null)}
-            >
-              Cancel
-            </button>
+            <div className="color-picker-body">
+              <HexColorPicker color={pendingColor} onChange={setPendingColor} />
+            </div>
+            <div className="color-picker-hex">
+              <span
+                className="color-picker-preview"
+                style={{ background: pendingColor }}
+              />
+              <input
+                className="sidebar-input color-picker-hex-input"
+                type="text"
+                value={pendingColor}
+                onChange={(e) => setPendingColor(e.target.value)}
+                spellCheck={false}
+              />
+            </div>
+            <div className="sidebar-btn-row">
+              <button
+                className="sidebar-btn"
+                onClick={() =>
+                  handleColorChange(colorPickerVisible, pendingColor)
+                }
+              >
+                OK
+              </button>
+              <button
+                className="sidebar-btn"
+                onClick={() => setColorPickerVisible(null)}
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}

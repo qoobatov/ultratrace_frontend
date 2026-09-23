@@ -10,12 +10,13 @@ import AudioPlayer from "./AudioPlayer";
 import TimelineBar from "./TimelineBar";
 import TextGridTiers from "./TextGridTiers";
 import SpectrogramView from "./SpectrogramView";
-import { getAudioSegmentUrl } from "../../api/client";
+import { getAudioSegmentUrl, getTextGridIntervals } from "../../api/client";
 import "./Timeline.css";
 
 const TG_ZOOM_FACTOR = 1.5;
 const WHEEL_ZOOM_FACTOR = 1.15;
 const DRAG_SELECT_THRESHOLD = 5;
+const BOUNDARY_EPS = 1e-4;
 
 const getFrameAtTime = (time, frameTimes) => {
   if (!frameTimes || frameTimes.length === 0) return 1;
@@ -56,15 +57,20 @@ const Timeline = forwardRef(
     const [selectedInterval, setSelectedInterval] = useState(null);
     const [dragSelection, setDragSelection] = useState(null);
 
+    const [tiers, setTiers] = useState({});
+    const [activeTier, setActiveTier] = useState(null);
+
     const audioRef = useRef(null);
     const overviewRef = useRef(null);
     const spectroRef = useRef(null);
     const tiersRef = useRef(null);
     const currentFrameRef = useRef(frame);
+    const currentTimeRef = useRef(currentTime);
+    const activeTierRef = useRef(activeTier);
+    const tiersDataRef = useRef(tiers);
     const playingSelectionRef = useRef(false);
     const stopCheckRef = useRef(null);
 
-    // Рефы для актуальных значений без пересоздания колбэков
     const durationRef = useRef(duration);
     const effStartRef = useRef(0);
     const effEndRef = useRef(0);
@@ -79,6 +85,15 @@ const Timeline = forwardRef(
     useEffect(() => {
       currentFrameRef.current = frame;
     }, [frame]);
+    useEffect(() => {
+      currentTimeRef.current = currentTime;
+    }, [currentTime]);
+    useEffect(() => {
+      activeTierRef.current = activeTier;
+    }, [activeTier]);
+    useEffect(() => {
+      tiersDataRef.current = tiers;
+    }, [tiers]);
 
     const effStart = viewStart ?? 0;
     const effEnd = viewEnd ?? duration;
@@ -88,7 +103,56 @@ const Timeline = forwardRef(
       effEndRef.current = effEnd;
     }, [effStart, effEnd]);
 
-    // ── clampView без зависимостей ────────────────────────────────────────
+    // ── Загрузка тиров ────────────────────────────────────────────────────
+    useEffect(() => {
+      let cancelled = false;
+      getTextGridIntervals()
+        .then((data) => {
+          if (cancelled) return;
+          const grouped = {};
+          data.forEach((item) => {
+            if (!grouped[item.tier]) grouped[item.tier] = [];
+            grouped[item.tier].push(item);
+          });
+          Object.keys(grouped).forEach((tier) => {
+            grouped[tier].sort((a, b) => a.start - b.start);
+          });
+          setTiers(grouped);
+          setActiveTier((prev) => {
+            if (prev && grouped[prev]) return prev;
+            return Object.keys(grouped)[0] || null;
+          });
+        })
+        .catch((err) => {
+          if (!cancelled) console.error("Failed to load TextGrid tiers", err);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }, []);
+
+    // ── Геометрия реального контента спектрограммы ────────────────────────
+    // Контейнер .timeline-spectrogram имеет padding-left (под колонку лейблов
+    // тиров). Клики/колесо должны считаться от фактического края картинки,
+    // а не от края контейнера с padding. Этот helper возвращает координаты
+    // img (или, если img ещё не загружен, эмулирует их через вычитание padding).
+    const getSpectroContentRect = useCallback(() => {
+      const container = spectroRef.current;
+      if (!container) return null;
+      const img = container.querySelector("img");
+      if (img) {
+        const r = img.getBoundingClientRect();
+        if (r.width > 0) return { left: r.left, width: r.width };
+      }
+      const r = container.getBoundingClientRect();
+      if (r.width <= 0) return null;
+      const cs = window.getComputedStyle(container);
+      const pl = parseFloat(cs.paddingLeft) || 0;
+      const pr = parseFloat(cs.paddingRight) || 0;
+      return { left: r.left + pl, width: r.width - pl - pr };
+    }, []);
+
+    // ── clampView ─────────────────────────────────────────────────────────
     const clampView = useCallback((start, end) => {
       const dur = durationRef.current || 1;
       const len = end - start;
@@ -99,7 +163,35 @@ const Timeline = forwardRef(
       return [s, e];
     }, []);
 
-    // ── Zoom — читают из рефов, не зависят от effStart/effEnd ────────────
+    // ── «Сделать видимым» ─────────────────────────────────────────────────
+    const ensureTimeRangeVisible = useCallback(
+      (start, end) => {
+        const s = effStartRef.current;
+        const e = effEndRef.current;
+        if (s >= e) return;
+        if (start >= s && end <= e) return;
+
+        const dur = e - s;
+        const pad = dur * 0.08;
+
+        let ns = s;
+        let ne = e;
+        if (start < s) {
+          ns = start - pad;
+          ne = ns + dur;
+        }
+        if (end > ne) {
+          ne = end + pad;
+          ns = ne - dur;
+        }
+        [ns, ne] = clampView(ns, ne);
+        setViewStart(ns);
+        setViewEnd(ne);
+      },
+      [clampView],
+    );
+
+    // ── Zoom ──────────────────────────────────────────────────────────────
     const zoomIn = useCallback(() => {
       const s = effStartRef.current;
       const e = effEndRef.current;
@@ -120,7 +212,6 @@ const Timeline = forwardRef(
       setViewEnd(ne);
     }, [clampView]);
 
-    // Зум в конкретную точку — сохраняет позицию курсора на месте
     const zoomAtTime = useCallback(
       (time, factor) => {
         const s = effStartRef.current;
@@ -188,13 +279,120 @@ const Timeline = forwardRef(
 
     const handleSeek = useCallback(
       (time) => {
+        const iv = selectedIntervalRef.current;
+
         if (audioRef.current) audioRef.current.seek(time);
         setCurrentTime(time);
         const calcFrame = getFrameAtTime(time, frameTimes);
         currentFrameRef.current = calcFrame;
         setFrame(calcFrame);
+
+        // Если идёт воспроизведение БЕЗ выделения — перезапускаем его
+        // с новой позиции. Иначе seek дёргает только основной <audio>,
+        // а играет segment-audio, и звук продолжает идти со старой позиции,
+        // пока не доиграет до конца — ровно то, что ты видел.
+        if (isPlaying && !iv) {
+          playingSelectionRef.current = false; // чтобы onPlayStateChange(false)
+          // не «отбросил» нас назад
+          audioRef.current?.pause();
+          const end = durationRef.current;
+          if (end > time) {
+            const url = getAudioSegmentUrl(time, end);
+            audioRef.current?.playSegmentUrl(url, time);
+          }
+        }
       },
-      [frameTimes, setFrame],
+      [frameTimes, setFrame, isPlaying],
+    );
+
+    // ── Praat-style keyboard navigation ───────────────────────────────────
+    const navigateInterval = useCallback(
+      (dir) => {
+        const tier = activeTierRef.current;
+        if (!tier) return;
+        const intervals = tiersDataRef.current[tier] || [];
+        if (!intervals.length) return;
+
+        const cur = selectedIntervalRef.current;
+        let anchorIdx = -1;
+        if (cur && cur.tier === tier) {
+          if (
+            Array.isArray(cur.intervalIndices) &&
+            cur.intervalIndices.length === 2
+          ) {
+            // Для многокусочного выделения берём его «дальний» край
+            anchorIdx =
+              dir > 0 ? cur.intervalIndices[1] : cur.intervalIndices[0];
+          } else {
+            anchorIdx = intervals.findIndex(
+              (iv) =>
+                Math.abs(iv.start - cur.start) < BOUNDARY_EPS &&
+                Math.abs(iv.end - cur.end) < BOUNDARY_EPS,
+            );
+          }
+        }
+
+        let nextIdx;
+        if (anchorIdx < 0) {
+          nextIdx = dir > 0 ? 0 : intervals.length - 1;
+        } else {
+          nextIdx = Math.max(
+            0,
+            Math.min(intervals.length - 1, anchorIdx + dir),
+          );
+          if (nextIdx === anchorIdx) return;
+        }
+
+        const iv = intervals[nextIdx];
+        setSelectedInterval({
+          ...iv,
+          intervalIndices: [nextIdx, nextIdx],
+        });
+        handleSeek(iv.start);
+        ensureTimeRangeVisible(iv.start, iv.end);
+      },
+      [handleSeek, ensureTimeRangeVisible],
+    );
+
+    const navigateTier = useCallback(
+      (dir) => {
+        const names = Object.keys(tiersDataRef.current);
+        if (!names.length) return;
+        const curTier = activeTierRef.current;
+        let idx = curTier ? names.indexOf(curTier) : -1;
+        if (idx < 0) idx = 0;
+        const nextIdx = Math.max(0, Math.min(names.length - 1, idx + dir));
+        if (nextIdx === idx) return;
+
+        const nextTier = names[nextIdx];
+        setActiveTier(nextTier);
+
+        const intervals = tiersDataRef.current[nextTier] || [];
+        if (!intervals.length) return;
+
+        const t = currentTimeRef.current;
+        let iv = intervals.find((x) => t >= x.start && t < x.end);
+        if (!iv) {
+          let best = intervals[0];
+          let bestDist = Infinity;
+          for (const x of intervals) {
+            const d = t < x.start ? x.start - t : t - x.end;
+            if (d < bestDist) {
+              bestDist = d;
+              best = x;
+            }
+          }
+          iv = best;
+        }
+
+        const ivIdx = intervals.indexOf(iv);
+        setSelectedInterval({
+          ...iv,
+          intervalIndices: [ivIdx, ivIdx],
+        });
+        ensureTimeRangeVisible(iv.start, iv.end);
+      },
+      [ensureTimeRangeVisible],
     );
 
     // ── Play / Pause (Praat-логика) ───────────────────────────────────────
@@ -228,17 +426,26 @@ const Timeline = forwardRef(
         return;
       }
 
-      // Praat-логика: выделение, если есть; иначе видимое окно.
+      const cur = currentTimeRef.current;
+      const s = effStartRef.current;
+      const e = effEndRef.current;
+
+      // Воспроизведение выделения: продолжить с текущей позиции,
+      // если она внутри выделения; иначе — с его начала.
       if (iv) {
-        playInterval(iv, iv.start);
+        const from = cur > iv.start && cur < iv.end ? cur : iv.start;
+        playInterval(iv, from);
         return;
       }
 
-      const s = effStartRef.current;
-      const e = effEndRef.current;
       if (e <= s) return;
-      const url = getAudioSegmentUrl(s, e);
-      audioRef.current.playSegmentUrl(url, s);
+
+      // Воспроизведение видимого окна: если курсор в окне — продолжить
+      // с него; если курсор вне окна (например, только что зазумились) —
+      // стартовать с начала окна.
+      const from = cur > s && cur < e ? cur : s;
+      const url = getAudioSegmentUrl(from, e);
+      audioRef.current.playSegmentUrl(url, from);
     }, [isPlaying, playInterval]);
 
     useEffect(() => {
@@ -250,9 +457,9 @@ const Timeline = forwardRef(
     // ── Клавиатура ────────────────────────────────────────────────────────
     useEffect(() => {
       const onKeyDown = (e) => {
-        const ctrl = e.ctrlKey || e.metaKey;
+        const cmd = e.ctrlKey || e.metaKey;
 
-        if (ctrl && ["i", "o", "a", "b"].includes(e.key)) e.preventDefault();
+        if (cmd && ["i", "o", "a", "b"].includes(e.key)) e.preventDefault();
         if (e.key === " ") e.preventDefault();
 
         if (
@@ -262,25 +469,38 @@ const Timeline = forwardRef(
         )
           return;
 
-        if (ctrl && e.key === "i") zoomIn();
-        if (ctrl && e.key === "o") zoomOut();
-        if (ctrl && e.key === "a") zoomAll();
-        if (ctrl && e.key === "b") zoomToSelection();
+        if (cmd && e.key === "i") zoomOut();
+        if (cmd && e.key === "o") zoomIn();
+        if (cmd && e.key === "a") zoomAll();
+        if (cmd && e.key === "b") zoomToSelection();
+
         if (e.key === " ") handlePlayPause();
+
+        if (cmd && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+          e.preventDefault();
+          navigateInterval(e.key === "ArrowRight" ? 1 : -1);
+          return;
+        }
+        if (cmd && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+          e.preventDefault();
+          navigateTier(e.key === "ArrowDown" ? 1 : -1);
+          return;
+        }
 
         if (e.shiftKey && e.key === "ArrowLeft") {
           e.preventDefault();
           panLeft();
+          return;
         }
         if (e.shiftKey && e.key === "ArrowRight") {
           e.preventDefault();
           panRight();
+          return;
         }
 
-        // ←/→: предыдущий / следующий кадр
         if (
           !e.shiftKey &&
-          !ctrl &&
+          !cmd &&
           (e.key === "ArrowLeft" || e.key === "ArrowRight")
         ) {
           e.preventDefault();
@@ -291,7 +511,10 @@ const Timeline = forwardRef(
             Math.min(frameTimes.length, currentFrameRef.current + dir),
           );
           const time = frameTimes[nextFrame - 1];
-          if (time != null) handleSeek(time);
+          if (time != null) {
+            handleSeek(time);
+            ensureTimeRangeVisible(time, time);
+          }
         }
       };
 
@@ -306,6 +529,9 @@ const Timeline = forwardRef(
       panRight,
       handlePlayPause,
       handleSeek,
+      navigateInterval,
+      navigateTier,
+      ensureTimeRangeVisible,
       frameTimes,
     ]);
 
@@ -315,13 +541,12 @@ const Timeline = forwardRef(
         if (!(e.ctrlKey || e.metaKey)) return;
         e.preventDefault();
 
-        const el = e.currentTarget;
-        const rect = el.getBoundingClientRect();
-        if (rect.width <= 0) return;
+        const scale = getSpectroContentRect();
+        if (!scale) return;
 
         const ratio = Math.max(
           0,
-          Math.min(1, (e.clientX - rect.left) / rect.width),
+          Math.min(1, (e.clientX - scale.left) / scale.width),
         );
         const s = effStartRef.current;
         const eT = effEndRef.current;
@@ -338,11 +563,9 @@ const Timeline = forwardRef(
       return () => {
         els.forEach((el) => el.removeEventListener("wheel", handler));
       };
-    }, [zoomAtTime]);
+    }, [zoomAtTime, getSpectroContentRect]);
 
     // ── Click + drag on spectrogram ───────────────────────────────────────
-    // Клик без движения — seek к ближайшему кадру.
-    // Drag — создаёт выделение (заменяет selectedInterval).
     useEffect(() => {
       const el = spectroRef.current;
       if (!el) return;
@@ -350,11 +573,11 @@ const Timeline = forwardRef(
       const dragStateRef = { current: null };
 
       const getTimeAtClientX = (clientX) => {
-        const rect = el.getBoundingClientRect();
-        if (rect.width <= 0) return null;
+        const scale = getSpectroContentRect();
+        if (!scale) return null;
         const ratio = Math.max(
           0,
-          Math.min(1, (clientX - rect.left) / rect.width),
+          Math.min(1, (clientX - scale.left) / scale.width),
         );
         const s = effStartRef.current;
         const eT = effEndRef.current;
@@ -421,7 +644,7 @@ const Timeline = forwardRef(
         window.removeEventListener("mousemove", handleMove);
         window.removeEventListener("mouseup", handleUp);
       };
-    }, [handleSeek]);
+    }, [handleSeek, getSpectroContentRect]);
 
     const handleResetSelection = useCallback(() => {
       stopSelection();
@@ -433,6 +656,7 @@ const Timeline = forwardRef(
     const handleSelectInterval = useCallback(
       (interval) => {
         setSelectedInterval(interval);
+        if (interval.tier) setActiveTier(interval.tier);
         if (frameTimes?.length) {
           let idx = 0;
           let minDiff = Infinity;
@@ -486,7 +710,6 @@ const Timeline = forwardRef(
       [frameTimes, isPlaying, zoomIn, zoomOut, zoomAll, zoomToSelection],
     );
 
-    // ── Overview click ────────────────────────────────────────────────────
     const handleOverviewClick = useCallback(
       (e) => {
         const el = overviewRef.current;
@@ -612,20 +835,25 @@ const Timeline = forwardRef(
         />
 
         {/* ── TimelineBar ── */}
-        <TimelineBar
-          duration={duration}
-          currentTime={currentTime}
-          onSeek={handleSeek}
-          frameTimes={frameTimes}
-          onFrameChange={setFrame}
-          viewStart={effStart}
-          viewEnd={effEnd}
-          selectedInterval={selectedInterval}
-        />
+        <div className="timeline-bar-wrap">
+          <TimelineBar
+            duration={duration}
+            currentTime={currentTime}
+            onSeek={handleSeek}
+            frameTimes={frameTimes}
+            onFrameChange={setFrame}
+            viewStart={effStart}
+            viewEnd={effEnd}
+            selectedInterval={selectedInterval}
+          />
+        </div>
 
         {/* ── TextGrid tiers ── */}
         <div className="timeline-tiers" ref={tiersRef}>
           <TextGridTiers
+            tiers={tiers}
+            activeTier={activeTier}
+            onActivateTier={setActiveTier}
             currentTime={currentTime}
             duration={duration}
             onSelectInterval={handleSelectInterval}
@@ -655,7 +883,6 @@ const Timeline = forwardRef(
                 />
               ))}
 
-          {/* Подсветка выделенного интервала */}
           {duration > 0 &&
             selectedInterval &&
             (() => {
@@ -678,7 +905,6 @@ const Timeline = forwardRef(
               ) : null;
             })()}
 
-          {/* Синяя линия — начало выделения */}
           {duration > 0 &&
             selectedInterval &&
             (() => {
@@ -699,7 +925,6 @@ const Timeline = forwardRef(
               ) : null;
             })()}
 
-          {/* Синяя линия — конец выделения */}
           {duration > 0 &&
             selectedInterval &&
             (() => {
@@ -720,7 +945,6 @@ const Timeline = forwardRef(
               ) : null;
             })()}
 
-          {/* Курсор */}
           {duration > 0 && cursorRatio >= 0 && cursorRatio <= 1 && (
             <div
               className="timeline-overview-cursor"

@@ -1,3 +1,8 @@
+:root {
+  --tier-label-width: 80px;
+  --timeline-left-pad: calc(var(--tier-label-width) + 4px); /* = 84px */
+}
+
 .timeline {
   background: #181825;
   border-top: 1px solid #313244;
@@ -61,9 +66,12 @@
 
 /* ── Spectrogram ── */
 .timeline-spectrogram {
-  padding: 0 8px;
   position: relative;
-  padding: 4px var(--tl-pad) 0;
+
+  /* 4px  — padding-left .tiers-container (там, где начинается .tier-label)
+     80px — ширина .tier-label
+     +4px padding-right, чтобы правый край картинки совпал с правым краем .tier-row */
+  padding: 4px 4px 0 84px;
 }
 
 /* ── Player row ── */
@@ -158,16 +166,45 @@
 .tier-label {
   width: 80px;
   flex-shrink: 0;
-  padding: 0 6px;
+  box-sizing: border-box;
+  padding: 0 4px;
   display: flex;
   align-items: center;
+  gap: 2px;
   font-size: 9px;
   line-height: 1.15;
   color: #a6adc8;
   background: #1e1e2e;
   border-right: 1px solid #313244;
   overflow: hidden;
+}
+
+.tier-toggle {
+  background: none;
+  border: none;
+  color: #6c7086;
+  cursor: pointer;
+  font-size: 10px;
+  padding: 0;
+  width: 12px;
+  flex-shrink: 0;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s;
+}
+
+.tier-toggle:hover {
+  color: #cdd6f4;
+}
+
+.tier-label-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
   word-break: break-word;
+  font-size: 9px;
 }
 
 .tier-row {
@@ -216,9 +253,8 @@
 }
 
 /* Свёрнутый тир: текст прячем, оставляем цветные полоски */
-.tier-with-label.is-collapsed .tier-label {
-  font-size: 0;
-  padding: 0;
+.tier-with-label.is-collapsed .tier-label-text {
+  display: none;
 }
 
 .tier-with-label.is-collapsed .tier-interval {
@@ -232,10 +268,11 @@
   position: relative;
   height: 30px;
   background: #11111b;
-  margin: 2px 8px 4px;
   border-radius: 2px;
   cursor: ew-resize;
-  margin: 2px var(--tl-pad) 4px;
+  /* слева 84px, чтобы контент overview совпал по x со спектрограммой и тирами
+     (колонка лейблов 80px + border 1px + padding 4px у .tiers-container) */
+  margin: 2px 4px 4px 84px;
 }
 
 .timeline-overview-window {
@@ -263,4 +300,15 @@
   width: 1px;
   background: rgba(137, 180, 250, 0.15);
   pointer-events: none;
+}
+/* ── Active tier (Praat-style keyboard nav) ── */
+.tier-label.is-active {
+  background: #313244;
+  color: #cdd6f4;
+  box-shadow: inset 3px 0 0 #89b4fa;
+}
+
+.timeline-bar-wrap {
+  padding-left: 84px;
+  padding-right: 4px;
 }

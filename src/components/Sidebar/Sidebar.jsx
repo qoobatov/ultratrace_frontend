@@ -7,14 +7,10 @@ import {
   setDefaultTrace,
   clearFramePoints,
   clearAllPoints,
-  getTextGridIntervals,
-  getFrameTimes,
   exportContours,
 } from "../../api/client";
 import { HexColorPicker } from "react-colorful";
 import "./Sidebar.css";
-
-const DISPLAY_TIERS = ["sentence", "word", "orthographic vowel"];
 
 const Sidebar = ({
   activeTrace,
@@ -36,48 +32,7 @@ const Sidebar = ({
   const [pendingColor, setPendingColor] = useState("#ffffff");
   const [localOffset, setLocalOffset] = useState(offset || 0);
 
-  // Annotations state
-  const [tierIntervals, setTierIntervals] = useState({});
-  const [frameTimes, setFrameTimes] = useState([]);
-  const [currentIndices, setCurrentIndices] = useState({});
   const cancelRef = useRef(false);
-
-  useEffect(() => {
-    const loadStats = async () => {
-      try {
-        const intervals = await getTextGridIntervals();
-        const ftData = await getFrameTimes();
-        const times = ftData.times || [];
-        setFrameTimes(times);
-
-        const grouped = {};
-        intervals.forEach((item) => {
-          if (!grouped[item.tier]) grouped[item.tier] = [];
-          grouped[item.tier].push(item);
-        });
-        Object.keys(grouped).forEach((tier) => {
-          grouped[tier].sort((a, b) => a.start - b.start);
-        });
-        setTierIntervals(grouped);
-      } catch (err) {
-        console.error("Failed to load TextGrid stats", err);
-      }
-    };
-    loadStats();
-  }, []);
-
-  useEffect(() => {
-    if (!frameTimes.length || !Object.keys(tierIntervals).length) return;
-    const t = frameTimes[frameNumber];
-    if (t == null) return;
-
-    const indices = {};
-    Object.entries(tierIntervals).forEach(([tier, intervals]) => {
-      indices[tier] = intervals.findIndex((iv) => t >= iv.start && t < iv.end);
-    });
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setCurrentIndices(indices);
-  }, [frameNumber, frameTimes, tierIntervals]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -304,23 +259,6 @@ const Sidebar = ({
             </button>
           </div>
         </div>
-      </div>
-
-      {/* ── Zone 3: Tiers ── */}
-      <div className="sidebar-zone zone-annotations">
-        <div className="sidebar-section-title">Tiers</div>
-        {DISPLAY_TIERS.map((tierName) => {
-          const intervals = tierIntervals[tierName] || [];
-          const idx = currentIndices[tierName] ?? -1;
-          return (
-            <div key={tierName} className="annotation-row">
-              <span className="annotation-label">{tierName}</span>
-              <span className="annotation-badge">
-                {idx >= 0 ? idx + 1 : "—"} / {intervals.length}
-              </span>
-            </div>
-          );
-        })}
       </div>
 
       {/* ── Zone 4: Offset ── */}

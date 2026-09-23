@@ -1,12 +1,12 @@
 .tiers-container {
   display: flex;
   flex-direction: column;
-  gap: 9px;
+  gap: 5px;
 }
 
 .tier-row {
   position: relative;
-  height: 22px;
+  height: 40px;
   background: #11111b;
   border-radius: 2px;
   overflow: hidden;
@@ -51,4 +51,37 @@
   font-weight: 600;
   border-color: #89b4fa;
   z-index: 1;
+}
+/* ── Drag handles for extending selection across intervals ── */
+.tier-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: ew-resize;
+  color: #cdd6f4;
+  font-size: 8px;
+  line-height: 1;
+  user-select: none;
+  z-index: 6;
+  background: rgba(137, 180, 250, 0.25);
+  transition: background 0.1s;
+}
+
+.tier-handle:hover,
+.tier-handle.is-dragging {
+  background: rgba(137, 180, 250, 0.8);
+  color: #1e1e2e;
+}
+
+.tier-handle-left {
+  transform: translateX(-100%);
+  border-radius: 2px 0 0 2px;
+}
+
+.tier-handle-right {
+  border-radius: 0 2px 2px 0;
 }

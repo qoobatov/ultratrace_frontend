@@ -1,11 +1,34 @@
-import { useState, useEffect, useRef } from "react";
-import { getTextGridIntervals } from "../../api/client";
+import { useState, useEffect, useRef, useCallback } from "react";
 import "./TextGridTiers.css";
 
 const DEFAULT_TIER_HEIGHT = 30;
-const COLLAPSED_TIER_HEIGHT = 6;
+const COLLAPSED_TIER_HEIGHT = 12;
+const COLLAPSED_STORAGE_KEY = "ultratrace.collapsedTiers";
+const BOUNDARY_EPS = 1e-4;
+
+const loadCollapsed = () => {
+  try {
+    const raw = sessionStorage.getItem(COLLAPSED_STORAGE_KEY);
+    if (!raw) return {};
+    const obj = JSON.parse(raw);
+    return obj && typeof obj === "object" ? obj : {};
+  } catch {
+    return {};
+  }
+};
+
+const saveCollapsed = (state) => {
+  try {
+    sessionStorage.setItem(COLLAPSED_STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    /* ignore */
+  }
+};
 
 const TextGridTiers = ({
+  tiers,
+  activeTier,
+  onActivateTier,
   currentTime,
   duration,
   onSelectInterval,
@@ -13,22 +36,43 @@ const TextGridTiers = ({
   viewEnd,
   selectedInterval,
 }) => {
-  const [tiers, setTiers] = useState({});
-  const [collapsed, setCollapsed] = useState({});
+  const [collapsed, setCollapsed] = useState(loadCollapsed);
+  const [draggingEdge, setDraggingEdge] = useState(null); // {side:'left'|'right', tier}
   const containerRef = useRef(null);
 
+  // Рефы для актуальных значений внутри глобальных mousemove/mouseup
+  const selectedIntervalRef = useRef(selectedInterval);
+  const tiersRef = useRef(tiers);
+  const effStartRef = useRef(0);
+  const effEndRef = useRef(0);
+
   useEffect(() => {
-    getTextGridIntervals().then((data) => {
-      const grouped = {};
-      data.forEach((item) => {
-        if (!grouped[item.tier]) grouped[item.tier] = [];
-        grouped[item.tier].push(item);
-      });
-      setTiers(grouped);
+    selectedIntervalRef.current = selectedInterval;
+  }, [selectedInterval]);
+  useEffect(() => {
+    tiersRef.current = tiers;
+  }, [tiers]);
+
+  const effStart = viewStart ?? 0;
+  const effEnd = viewEnd ?? duration;
+  useEffect(() => {
+    effStartRef.current = effStart;
+    effEndRef.current = effEnd;
+  }, [effStart, effEnd]);
+
+  // ── Toggle свёрнутости ───────────────────────────────────────────────
+  const toggleCollapsed = useCallback((tierName) => {
+    setCollapsed((prev) => {
+      const isCollapsed = !!prev[tierName];
+      const next = { ...prev };
+      if (isCollapsed) delete next[tierName];
+      else next[tierName] = true;
+      saveCollapsed(next);
+      return next;
     });
   }, []);
 
-  // Scroll над тиром → свернуть/развернуть. Ctrl+wheel не трогаем.
+  // ── Scroll → collapse ────────────────────────────────────────────────
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -47,38 +91,184 @@ const TextGridTiers = ({
         const isCollapsed = !!prev[tierName];
         const shouldCollapse = e.deltaY > 0;
         const shouldExpand = e.deltaY < 0;
+        let next = prev;
         if (shouldCollapse && !isCollapsed) {
-          return { ...prev, [tierName]: true };
-        }
-        if (shouldExpand && isCollapsed) {
-          const next = { ...prev };
+          next = { ...prev, [tierName]: true };
+        } else if (shouldExpand && isCollapsed) {
+          next = { ...prev };
           delete next[tierName];
-          return next;
         }
-        return prev;
+        if (next !== prev) saveCollapsed(next);
+        return next;
       });
     };
 
     el.addEventListener("wheel", handler, { passive: false });
     return () => el.removeEventListener("wheel", handler);
-    // Зависимость от наличия тиров — эффект должен (пере)запуститься
-    // после того, как контейнер реально отрисован
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [Object.keys(tiers).length]);
+  }, [tiers]);
 
-  if (!Object.keys(tiers).length) return null;
+  // ── Drag ручек выделения ─────────────────────────────────────────────
+  const dragStateRef = useRef(null);
+  const justDraggedRef = useRef(false);
 
-  const effStart = viewStart ?? 0;
-  const effEnd = viewEnd ?? duration;
+  const startEdgeDrag = useCallback((side, tierName, e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const rowEl = e.currentTarget.closest(".tier-row");
+    if (!rowEl) return;
+    const rowRect = rowEl.getBoundingClientRect();
+    dragStateRef.current = {
+      side,
+      tierName,
+      rowRect,
+      moved: false,
+      startX: e.clientX,
+    };
+    setDraggingEdge({ side, tierName });
+  }, []);
+
+  useEffect(() => {
+    if (!draggingEdge) return;
+
+    const onMove = (e) => {
+      const st = dragStateRef.current;
+      if (!st) return;
+      const dx = Math.abs(e.clientX - st.startX);
+      if (!st.moved && dx < 3) return;
+      st.moved = true;
+      justDraggedRef.current = true;
+
+      const rect = st.rowRect;
+      if (!rect || rect.width <= 0) return;
+      const ratio = Math.max(
+        0,
+        Math.min(1, (e.clientX - rect.left) / rect.width),
+      );
+      const tStart = effStartRef.current;
+      const tEnd = effEndRef.current;
+      const timeAtCursor = tStart + ratio * (tEnd - tStart);
+
+      const allIntervals = tiersRef.current[st.tierName] || [];
+      if (!allIntervals.length) return;
+
+      const cur = selectedIntervalRef.current;
+      if (!cur || cur.tier !== st.tierName) return;
+
+      // Текущий диапазон индексов
+      let i = Array.isArray(cur.intervalIndices) ? cur.intervalIndices[0] : -1;
+      let j = Array.isArray(cur.intervalIndices) ? cur.intervalIndices[1] : -1;
+      if (i < 0 || j < 0) {
+        i = allIntervals.findIndex(
+          (iv) => Math.abs(iv.start - cur.start) < BOUNDARY_EPS,
+        );
+        j = allIntervals.findIndex(
+          (iv) => Math.abs(iv.end - cur.end) < BOUNDARY_EPS,
+        );
+        if (i < 0 || j < 0) return;
+      }
+
+      if (st.side === "right") {
+        // Ищем ближайшую правую границу интервала (end)
+        let best = j;
+        let bestDist = Infinity;
+        for (let k = i; k < allIntervals.length; k++) {
+          const d = Math.abs(allIntervals[k].end - timeAtCursor);
+          if (d < bestDist) {
+            bestDist = d;
+            best = k;
+          }
+        }
+        j = best;
+      } else {
+        // Ищем ближайшую левую границу интервала (start)
+        let best = i;
+        let bestDist = Infinity;
+        for (let k = 0; k <= j; k++) {
+          const d = Math.abs(allIntervals[k].start - timeAtCursor);
+          if (d < bestDist) {
+            bestDist = d;
+            best = k;
+          }
+        }
+        i = best;
+      }
+
+      if (i > j) [i, j] = [j, i];
+
+      const firstIv = allIntervals[i];
+      const lastIv = allIntervals[j];
+      const text = allIntervals
+        .slice(i, j + 1)
+        .map((x) => x.text)
+        .filter(Boolean)
+        .join(" ");
+
+      onSelectInterval?.({
+        tier: st.tierName,
+        start: firstIv.start,
+        end: lastIv.end,
+        text,
+        intervalIndices: [i, j],
+      });
+    };
+
+    const onUp = () => {
+      dragStateRef.current = null;
+      setDraggingEdge(null);
+      // Сбросим флаг чуть позже, чтобы click после mouseup не отработал
+      setTimeout(() => {
+        justDraggedRef.current = false;
+      }, 0);
+    };
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [draggingEdge, onSelectInterval]);
+
+  // Блокируем click по интервалу сразу после drag
+  const handleContainerClickCapture = useCallback((e) => {
+    if (justDraggedRef.current) {
+      e.stopPropagation();
+      e.preventDefault();
+      justDraggedRef.current = false;
+    }
+  }, []);
+
+  if (!tiers || !Object.keys(tiers).length) return null;
+
   const viewDuration = effEnd - effStart;
 
   return (
-    <div className="tiers-container" ref={containerRef}>
+    <div
+      className="tiers-container"
+      ref={containerRef}
+      onClickCapture={handleContainerClickCapture}
+    >
       {Object.entries(tiers).map(([tierName, intervals]) => {
         const isCollapsed = !!collapsed[tierName];
+        const isActive = tierName === activeTier;
         const visibleIntervals = intervals.filter(
           (iv) => iv.end > effStart && iv.start < effEnd,
         );
+
+        // Границы выделения — только для активного тира
+        const showHandles =
+          !isCollapsed &&
+          selectedInterval &&
+          selectedInterval.tier === tierName &&
+          Array.isArray(selectedInterval.intervalIndices);
+
+        const selStartRatio = showHandles
+          ? (selectedInterval.start - effStart) / viewDuration
+          : 0;
+        const selEndRatio = showHandles
+          ? (selectedInterval.end - effStart) / viewDuration
+          : 0;
+
         return (
           <div
             key={tierName}
@@ -87,15 +277,45 @@ const TextGridTiers = ({
             style={{
               height: isCollapsed ? COLLAPSED_TIER_HEIGHT : DEFAULT_TIER_HEIGHT,
             }}
+            onClick={() => onActivateTier?.(tierName)}
           >
-            <div className="tier-label" title={tierName}>
-              {tierName}
+            <div
+              className={`tier-label${isActive ? " is-active" : ""}`}
+              onDoubleClick={() => toggleCollapsed(tierName)}
+              title={`${tierName} (double-click to collapse)`}
+            >
+              <button
+                type="button"
+                className="tier-toggle"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleCollapsed(tierName);
+                }}
+                title={isCollapsed ? "Expand tier" : "Collapse tier"}
+                aria-label={isCollapsed ? "Expand tier" : "Collapse tier"}
+              >
+                {isCollapsed ? "▸" : "▾"}
+              </button>
+              <span className="tier-label-text">{tierName}</span>
             </div>
             <div className="tier-row">
               {visibleIntervals.map((interval, idx) => {
+                const globalIdx = intervals.indexOf(interval);
+                const isSelected =
+                  selectedInterval &&
+                  selectedInterval.tier === tierName &&
+                  globalIdx >= 0 &&
+                  Array.isArray(selectedInterval.intervalIndices) &&
+                  globalIdx >= selectedInterval.intervalIndices[0] &&
+                  globalIdx <= selectedInterval.intervalIndices[1];
+
+                const isCurrent =
+                  !isSelected &&
+                  currentTime >= interval.start &&
+                  currentTime < interval.end;
+
                 const clampedStart = Math.max(interval.start, effStart);
                 const clampedEnd = Math.min(interval.end, effEnd);
-
                 const left = viewDuration
                   ? ((clampedStart - effStart) / viewDuration) * 100
                   : 0;
@@ -103,24 +323,17 @@ const TextGridTiers = ({
                   ? ((clampedEnd - clampedStart) / viewDuration) * 100
                   : 0;
 
-                const isSelected =
-                  selectedInterval &&
-                  selectedInterval.start === interval.start &&
-                  selectedInterval.end === interval.end &&
-                  selectedInterval.tier === interval.tier;
-
-                const isCurrent =
-                  !isSelected &&
-                  currentTime >= interval.start &&
-                  currentTime < interval.end;
-
                 return (
                   <div
                     key={idx}
                     className={`tier-interval${isSelected ? " is-selected" : isCurrent ? " is-current" : ""}`}
                     style={{ left: `${left}%`, width: `${width}%` }}
                     onClick={() =>
-                      onSelectInterval && onSelectInterval(interval)
+                      onSelectInterval &&
+                      onSelectInterval({
+                        ...interval,
+                        intervalIndices: [globalIdx, globalIdx],
+                      })
                     }
                     title={interval.text}
                   >
@@ -128,6 +341,28 @@ const TextGridTiers = ({
                   </div>
                 );
               })}
+
+              {showHandles && selStartRatio >= 0 && selStartRatio <= 1 && (
+                <div
+                  className={`tier-handle tier-handle-left${draggingEdge?.side === "left" && draggingEdge?.tier === tierName ? " is-dragging" : ""}`}
+                  style={{ left: `${selStartRatio * 100}%` }}
+                  onMouseDown={(e) => startEdgeDrag("left", tierName, e)}
+                  title="Drag to extend selection left"
+                >
+                  ◀
+                </div>
+              )}
+
+              {showHandles && selEndRatio >= 0 && selEndRatio <= 1 && (
+                <div
+                  className={`tier-handle tier-handle-right${draggingEdge?.side === "right" && draggingEdge?.tier === tierName ? " is-dragging" : ""}`}
+                  style={{ left: `${selEndRatio * 100}%` }}
+                  onMouseDown={(e) => startEdgeDrag("right", tierName, e)}
+                  title="Drag to extend selection right"
+                >
+                  ▶
+                </div>
+              )}
             </div>
           </div>
         );

@@ -10,7 +10,13 @@ import AudioPlayer from "./AudioPlayer";
 import TimelineBar from "./TimelineBar";
 import TextGridTiers from "./TextGridTiers";
 import SpectrogramView from "./SpectrogramView";
-import { getAudioSegmentUrl, getTextGridIntervals } from "../../api/client";
+import {
+  getAudioSegmentUrl,
+  getTextGridIntervals,
+  updateIntervalText,
+  getTextGridBackupStatus,
+  revertTextGrid,
+} from "../../api/client";
 import "./Timeline.css";
 
 const TG_ZOOM_FACTOR = 1.5;
@@ -59,6 +65,7 @@ const Timeline = forwardRef(
 
     const [tiers, setTiers] = useState({});
     const [activeTier, setActiveTier] = useState(null);
+    const [hasTextGridBackup, setHasTextGridBackup] = useState(false);
 
     const audioRef = useRef(null);
     const overviewRef = useRef(null);
@@ -104,32 +111,40 @@ const Timeline = forwardRef(
     }, [effStart, effEnd]);
 
     // ── Загрузка тиров ────────────────────────────────────────────────────
-    useEffect(() => {
-      let cancelled = false;
-      getTextGridIntervals()
-        .then((data) => {
-          if (cancelled) return;
-          const grouped = {};
-          data.forEach((item) => {
-            if (!grouped[item.tier]) grouped[item.tier] = [];
-            grouped[item.tier].push(item);
-          });
-          Object.keys(grouped).forEach((tier) => {
-            grouped[tier].sort((a, b) => a.start - b.start);
-          });
-          setTiers(grouped);
-          setActiveTier((prev) => {
-            if (prev && grouped[prev]) return prev;
-            return Object.keys(grouped)[0] || null;
-          });
-        })
-        .catch((err) => {
-          if (!cancelled) console.error("Failed to load TextGrid tiers", err);
+    const loadTiers = useCallback(async () => {
+      try {
+        const data = await getTextGridIntervals();
+        const grouped = {};
+        data.forEach((item) => {
+          if (!grouped[item.tier]) grouped[item.tier] = [];
+          grouped[item.tier].push(item);
         });
-      return () => {
-        cancelled = true;
-      };
+        Object.keys(grouped).forEach((tier) => {
+          grouped[tier].sort((a, b) => a.start - b.start);
+        });
+        setTiers(grouped);
+        setActiveTier((prev) => {
+          if (prev && grouped[prev]) return prev;
+          return Object.keys(grouped)[0] || null;
+        });
+      } catch (err) {
+        console.error("Failed to load TextGrid tiers", err);
+      }
     }, []);
+
+    const refreshBackupStatus = useCallback(async () => {
+      try {
+        const data = await getTextGridBackupStatus();
+        setHasTextGridBackup(!!data?.hasBackup);
+      } catch (err) {
+        console.error("Failed to get TextGrid backup status", err);
+      }
+    }, []);
+
+    useEffect(() => {
+      loadTiers();
+      refreshBackupStatus();
+    }, [loadTiers, refreshBackupStatus]);
 
     // ── Геометрия реального контента спектрограммы ────────────────────────
     // Контейнер .timeline-spectrogram имеет padding-left (под колонку лейблов
@@ -314,42 +329,46 @@ const Timeline = forwardRef(
         if (!intervals.length) return;
 
         const cur = selectedIntervalRef.current;
-        let anchorIdx = -1;
+        let anchorIdxRaw = -1;
         if (cur && cur.tier === tier) {
           if (
             Array.isArray(cur.intervalIndices) &&
             cur.intervalIndices.length === 2
           ) {
-            // Для многокусочного выделения берём его «дальний» край
-            anchorIdx =
+            anchorIdxRaw =
               dir > 0 ? cur.intervalIndices[1] : cur.intervalIndices[0];
           } else {
-            anchorIdx = intervals.findIndex(
+            const found = intervals.find(
               (iv) =>
                 Math.abs(iv.start - cur.start) < BOUNDARY_EPS &&
                 Math.abs(iv.end - cur.end) < BOUNDARY_EPS,
             );
+            if (found) anchorIdxRaw = found.idx;
           }
         }
+        let nextIv;
 
-        let nextIdx;
-        if (anchorIdx < 0) {
-          nextIdx = dir > 0 ? 0 : intervals.length - 1;
+        if (anchorIdxRaw < 0) {
+          nextIv = dir > 0 ? intervals[0] : intervals[intervals.length - 1];
         } else {
-          nextIdx = Math.max(
-            0,
-            Math.min(intervals.length - 1, anchorIdx + dir),
-          );
-          if (nextIdx === anchorIdx) return;
+          const pos = intervals.findIndex((iv) => iv.idx === anchorIdxRaw);
+          let nextPos;
+          if (pos < 0) {
+            nextPos = dir > 0 ? 0 : intervals.length - 1;
+          } else {
+            nextPos = Math.max(0, Math.min(intervals.length - 1, pos + dir));
+            if (nextPos === pos) return;
+          }
+          nextIv = intervals[nextPos];
         }
+        if (!nextIv) return;
 
-        const iv = intervals[nextIdx];
         setSelectedInterval({
-          ...iv,
-          intervalIndices: [nextIdx, nextIdx],
+          ...nextIv,
+          intervalIndices: [nextIv.idx, nextIv.idx],
         });
-        handleSeek(iv.start);
-        ensureTimeRangeVisible(iv.start, iv.end);
+        handleSeek(nextIv.start);
+        ensureTimeRangeVisible(nextIv.start, nextIv.end);
       },
       [handleSeek, ensureTimeRangeVisible],
     );
@@ -385,10 +404,9 @@ const Timeline = forwardRef(
           iv = best;
         }
 
-        const ivIdx = intervals.indexOf(iv);
         setSelectedInterval({
           ...iv,
-          intervalIndices: [ivIdx, ivIdx],
+          intervalIndices: [iv.idx, iv.idx],
         });
         ensureTimeRangeVisible(iv.start, iv.end);
       },
@@ -679,6 +697,58 @@ const Timeline = forwardRef(
       [handleSeek, frameTimes, setFrame],
     );
 
+    const handleEditInterval = useCallback(
+      async (tierName, idx, newText) => {
+        try {
+          const updated = await updateIntervalText(tierName, idx, newText);
+          setTiers((prev) => {
+            const arr = prev[tierName];
+            if (!arr) return prev;
+            const next = arr.map((iv) =>
+              iv.idx === idx ? { ...iv, text: updated.text } : iv,
+            );
+            return { ...prev, [tierName]: next };
+          });
+          setSelectedInterval((prev) => {
+            if (!prev || prev.tier !== tierName || prev.idx !== idx) {
+              return prev;
+            }
+            return { ...prev, text: updated.text };
+          });
+          // Первая правка создаёт .bak — обновим состояние кнопки Revert
+          refreshBackupStatus();
+        } catch (err) {
+          console.error("Failed to update interval text", err);
+          // eslint-disable-next-line no-alert
+          alert(
+            `Failed to save interval text: ${err?.response?.data?.detail || err.message || err}`,
+          );
+        }
+      },
+      [refreshBackupStatus],
+    );
+
+    const handleRevertTextGrid = useCallback(async () => {
+      if (!hasTextGridBackup) return;
+      const ok = window.confirm(
+        "Restore TextGrid from backup?\n\nAll mark edits made through the UI will be lost.",
+      );
+      if (!ok) return;
+
+      try {
+        await revertTextGrid();
+        await loadTiers();
+        await refreshBackupStatus();
+        setSelectedInterval(null);
+      } catch (err) {
+        console.error("Failed to revert TextGrid", err);
+        // eslint-disable-next-line no-alert
+        alert(
+          `Failed to revert: ${err?.response?.data?.detail || err.message || err}`,
+        );
+      }
+    }, [hasTextGridBackup, loadTiers, refreshBackupStatus]);
+
     const handleStop = useCallback(() => {
       setSelectedInterval(null);
       if (stopCheckRef.current) {
@@ -793,6 +863,19 @@ const Timeline = forwardRef(
             ↩️ Reset
           </button>
 
+          <button
+            className="tl-btn tl-btn-icon"
+            onClick={handleRevertTextGrid}
+            disabled={!hasTextGridBackup}
+            title={
+              hasTextGridBackup
+                ? "Restore TextGrid from backup (undo all mark edits)"
+                : "No backup yet — nothing to restore"
+            }
+          >
+            ↺ Revert
+          </button>
+
           <div className="tl-divider" />
 
           <button
@@ -857,6 +940,7 @@ const Timeline = forwardRef(
             currentTime={currentTime}
             duration={duration}
             onSelectInterval={handleSelectInterval}
+            onEditInterval={handleEditInterval}
             viewStart={effStart}
             viewEnd={effEnd}
             selectedInterval={selectedInterval}

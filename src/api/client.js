@@ -80,6 +80,23 @@ export const getTextGridIntervals = async () => {
   return response.data;
 };
 
+export const updateIntervalText = async (tier, idx, text) => {
+  const response = await client.put(
+    `/textgrid/intervals/${encodeURIComponent(tier)}/${idx}`,
+    { text },
+  );
+  return response.data;
+};
+
+export const getTextGridBackupStatus = async () => {
+  const response = await client.get("/textgrid/backup-status");
+  return response.data;
+};
+
+export const revertTextGrid = async () => {
+  const response = await client.post("/textgrid/revert");
+  return response.data;
+};
 // --- Спектрограмма ---
 export const getSpectrogramUrl = () => `${API_BASE}/spectrogram/`;
 

@@ -4,7 +4,7 @@ import "./TextGridTiers.css";
 const DEFAULT_TIER_HEIGHT = 30;
 const COLLAPSED_TIER_HEIGHT = 12;
 const COLLAPSED_STORAGE_KEY = "ultratrace.collapsedTiers";
-const BOUNDARY_EPS = 1e-4;
+// const BOUNDARY_EPS = 1e-4;
 
 const loadCollapsed = () => {
   try {
@@ -32,11 +32,13 @@ const TextGridTiers = ({
   currentTime,
   duration,
   onSelectInterval,
+  onEditInterval,
   viewStart,
   viewEnd,
   selectedInterval,
 }) => {
   const [collapsed, setCollapsed] = useState(loadCollapsed);
+  const [editing, setEditing] = useState(null); // { tier, idx, value, originalText }
   const [draggingEdge, setDraggingEdge] = useState(null); // {side:'left'|'right', tier}
   const containerRef = useRef(null);
 
@@ -70,6 +72,30 @@ const TextGridTiers = ({
       saveCollapsed(next);
       return next;
     });
+  }, []);
+
+  const beginEdit = useCallback((tierName, idx, currentText) => {
+    setEditing({
+      tier: tierName,
+      idx,
+      value: currentText,
+      originalText: currentText,
+    });
+  }, []);
+
+  const commitEdit = useCallback(() => {
+    setEditing((cur) => {
+      if (!cur) return null;
+      const trimmed = cur.value;
+      if (trimmed !== cur.originalText) {
+        onEditInterval?.(cur.tier, cur.idx, trimmed);
+      }
+      return null;
+    });
+  }, [onEditInterval]);
+
+  const cancelEdit = useCallback(() => {
+    setEditing(null);
   }, []);
 
   // ── Scroll → collapse ────────────────────────────────────────────────
@@ -154,51 +180,46 @@ const TextGridTiers = ({
       const cur = selectedIntervalRef.current;
       if (!cur || cur.tier !== st.tierName) return;
 
-      // Текущий диапазон индексов
+      // Текущий диапазон — в СЫРЫХ индексах (interval.idx)
       let i = Array.isArray(cur.intervalIndices) ? cur.intervalIndices[0] : -1;
       let j = Array.isArray(cur.intervalIndices) ? cur.intervalIndices[1] : -1;
-      if (i < 0 || j < 0) {
-        i = allIntervals.findIndex(
-          (iv) => Math.abs(iv.start - cur.start) < BOUNDARY_EPS,
-        );
-        j = allIntervals.findIndex(
-          (iv) => Math.abs(iv.end - cur.end) < BOUNDARY_EPS,
-        );
-        if (i < 0 || j < 0) return;
-      }
+      if (i < 0 || j < 0) return;
 
       if (st.side === "right") {
-        // Ищем ближайшую правую границу интервала (end)
-        let best = j;
+        // Ищем ближайшую правую границу (end) среди интервалов с idx >= i
+        let newJ = j;
         let bestDist = Infinity;
-        for (let k = i; k < allIntervals.length; k++) {
-          const d = Math.abs(allIntervals[k].end - timeAtCursor);
+        for (const iv of allIntervals) {
+          if (iv.idx < i) continue;
+          const d = Math.abs(iv.end - timeAtCursor);
           if (d < bestDist) {
             bestDist = d;
-            best = k;
+            newJ = iv.idx;
           }
         }
-        j = best;
+        j = newJ;
       } else {
-        // Ищем ближайшую левую границу интервала (start)
-        let best = i;
+        // Ищем ближайшую левую границу (start) среди интервалов с idx <= j
+        let newI = i;
         let bestDist = Infinity;
-        for (let k = 0; k <= j; k++) {
-          const d = Math.abs(allIntervals[k].start - timeAtCursor);
+        for (const iv of allIntervals) {
+          if (iv.idx > j) continue;
+          const d = Math.abs(iv.start - timeAtCursor);
           if (d < bestDist) {
             bestDist = d;
-            best = k;
+            newI = iv.idx;
           }
         }
-        i = best;
+        i = newI;
       }
 
       if (i > j) [i, j] = [j, i];
 
-      const firstIv = allIntervals[i];
-      const lastIv = allIntervals[j];
+      const firstIv = allIntervals.find((x) => x.idx === i);
+      const lastIv = allIntervals.find((x) => x.idx === j);
+      if (!firstIv || !lastIv) return;
       const text = allIntervals
-        .slice(i, j + 1)
+        .filter((x) => x.idx >= i && x.idx <= j)
         .map((x) => x.text)
         .filter(Boolean)
         .join(" ");
@@ -300,14 +321,12 @@ const TextGridTiers = ({
             </div>
             <div className="tier-row">
               {visibleIntervals.map((interval, idx) => {
-                const globalIdx = intervals.indexOf(interval);
                 const isSelected =
                   selectedInterval &&
                   selectedInterval.tier === tierName &&
-                  globalIdx >= 0 &&
                   Array.isArray(selectedInterval.intervalIndices) &&
-                  globalIdx >= selectedInterval.intervalIndices[0] &&
-                  globalIdx <= selectedInterval.intervalIndices[1];
+                  interval.idx >= selectedInterval.intervalIndices[0] &&
+                  interval.idx <= selectedInterval.intervalIndices[1];
 
                 const isCurrent =
                   !isSelected &&
@@ -332,10 +351,14 @@ const TextGridTiers = ({
                       onSelectInterval &&
                       onSelectInterval({
                         ...interval,
-                        intervalIndices: [globalIdx, globalIdx],
+                        intervalIndices: [interval.idx, interval.idx],
                       })
                     }
-                    title={interval.text}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      beginEdit(tierName, interval.idx, interval.text);
+                    }}
+                    title={`${interval.text} (double-click to edit)`}
                   >
                     {interval.text}
                   </div>
@@ -352,6 +375,43 @@ const TextGridTiers = ({
                   ◀
                 </div>
               )}
+              {editing &&
+                editing.tier === tierName &&
+                (() => {
+                  const iv = intervals.find((x) => x.idx === editing.idx);
+                  if (!iv) return null;
+                  const s = Math.max(iv.start, effStart);
+                  const left = viewDuration
+                    ? ((s - effStart) / viewDuration) * 100
+                    : 0;
+                  return (
+                    <input
+                      className="tier-interval-editor"
+                      style={{ left: `${left}%` }}
+                      value={editing.value}
+                      onChange={(e) =>
+                        setEditing((cur) =>
+                          cur ? { ...cur, value: e.target.value } : cur,
+                        )
+                      }
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          commitEdit();
+                        } else if (e.key === "Escape") {
+                          e.preventDefault();
+                          cancelEdit();
+                        }
+                      }}
+                      onBlur={commitEdit}
+                      onClick={(e) => e.stopPropagation()}
+                      onDoubleClick={(e) => e.stopPropagation()}
+                      autoFocus
+                      onFocus={(e) => e.target.select()}
+                      spellCheck={false}
+                    />
+                  );
+                })()}
 
               {showHandles && selEndRatio >= 0 && selEndRatio <= 1 && (
                 <div
